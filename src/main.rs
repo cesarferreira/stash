@@ -5,6 +5,7 @@ mod detect;
 mod fonts;
 mod hotkey;
 mod model;
+mod paste;
 mod paths;
 mod search;
 mod selectable_preview;

@@ -64,7 +64,9 @@ Keep the process running. It captures clipboard changes while open (including wh
 | Hide | `esc` |
 | Quit | `cmd+q` or Dock → Quit |
 
-In the popup: ↑↓ to move, `enter` to copy + hide, `tab` for actions, `cmd+e` edit, `cmd+p` pin, `cmd+d` delete.
+In the popup: ↑↓ to move, `enter` to paste into the previous app, `tab` for actions, `cmd+e` edit, `cmd+p` pin, `cmd+d` delete.
+
+Paste-back needs **Accessibility** permission for stash (System Settings → Privacy & Security → Accessibility) so it can send ⌘V.
 
 <a id="config"></a>
 ## Config

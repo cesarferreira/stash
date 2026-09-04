@@ -125,6 +125,29 @@ fn rgba_to_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Write text to the system pasteboard (for other apps to paste).
+pub fn write_text(text: &str) -> Result<(), String> {
+    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard
+        .set_text(text.to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// Write a PNG blob to the system pasteboard as an image.
+pub fn write_png(png: &[u8]) -> Result<(), String> {
+    let img = image::load_from_memory(png).map_err(|e| e.to_string())?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+        })
+        .map_err(|e| e.to_string())
+}
+
 /// Dominant-ish accent from PNG bytes for list thumbnails.
 pub fn accent_from_png(png: &[u8]) -> u32 {
     let Ok(img) = image::load_from_memory(png) else {

@@ -9,10 +9,10 @@ use crate::store::Store;
 use crate::transform::{TransformKind, openable_url, transform_entry};
 use chrono::Utc;
 use gpui::{
-    AnyWindowHandle, App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable,
-    KeyBinding, KeyDownEvent, ObjectFit, SharedString, Window, WindowBackgroundAppearance,
-    WindowBounds, WindowDecorations, WindowKind, WindowOptions, actions, div, img, prelude::*, px,
-    rgb, rgba, size,
+    AnyWindowHandle, App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable, Image,
+    ImageFormat, KeyBinding, KeyDownEvent, ObjectFit, SharedString, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind, WindowOptions,
+    actions, div, img, prelude::*, px, rgb, rgba, size,
 };
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -286,20 +286,16 @@ impl StashApp {
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
         match self.mode {
             UiMode::Search => {
-                if let Some(content) = self.paste_payload() {
-                    self.copy_and_hide(&content, cx);
+                if let Some(entry) = self.selected_entry().cloned() {
+                    self.copy_entry_and_hide(&entry, cx);
                 }
             }
             UiMode::Actions => self.run_selected_action(window, cx),
             UiMode::Edit => {
                 let content = self.edit_buffer.clone();
-                self.copy_and_hide(&content, cx);
+                self.copy_text_and_hide(&content, cx);
             }
         }
-    }
-
-    fn paste_payload(&self) -> Option<String> {
-        self.selected_entry().map(|entry| entry.content.clone())
     }
 
     fn paste_index(&mut self, index: usize, _: &mut Window, cx: &mut Context<Self>) {
@@ -308,8 +304,8 @@ impl StashApp {
         }
         let indices = self.ranked_indices();
         if let Some(&entry_idx) = indices.get(index) {
-            let content = self.entries[entry_idx].content.clone();
-            self.copy_and_hide(&content, cx);
+            let entry = self.entries[entry_idx].clone();
+            self.copy_entry_and_hide(&entry, cx);
         }
     }
 
@@ -391,10 +387,22 @@ impl StashApp {
             cx.notify();
             return;
         }
-        if let Some(content) = self.paste_payload() {
-            cx.write_to_clipboard(ClipboardItem::new_string(content));
-            self.status = "copied".into();
-            cx.notify();
+        if let Some(entry) = self.selected_entry().cloned() {
+            match clipboard_item_for_entry(&entry) {
+                Ok(item) => {
+                    cx.write_to_clipboard(item);
+                    self.status = if entry.is_image() {
+                        "copied image".into()
+                    } else {
+                        "copied".into()
+                    };
+                    cx.notify();
+                }
+                Err(err) => {
+                    self.status = format!("copy failed: {err}").into();
+                    cx.notify();
+                }
+            }
         }
     }
 
@@ -408,7 +416,7 @@ impl StashApp {
         };
         match action {
             PrototypeAction::Paste | PrototypeAction::Copy => {
-                self.copy_and_hide(&entry.content, cx);
+                self.copy_entry_and_hide(&entry, cx);
             }
             PrototypeAction::PrettyJson => {
                 self.apply_transform(&entry, TransformKind::PrettyJson, cx);
@@ -450,7 +458,7 @@ impl StashApp {
         cx: &mut Context<Self>,
     ) {
         match transform_entry(entry, kind) {
-            Ok(content) => self.copy_and_hide(&content, cx),
+            Ok(content) => self.copy_text_and_hide(&content, cx),
             Err(err) => {
                 self.status = err.message().to_string().into();
                 cx.notify();
@@ -458,13 +466,44 @@ impl StashApp {
         }
     }
 
-    fn copy_and_hide(&mut self, content: &str, cx: &mut Context<Self>) {
+    fn copy_text_and_hide(&mut self, content: &str, cx: &mut Context<Self>) {
+        if let Err(err) = crate::clipboard::write_text(content) {
+            self.status = format!("copy failed: {err}").into();
+            cx.notify();
+            return;
+        }
+        // Keep GPUI clipboard in sync for in-app reads.
         cx.write_to_clipboard(ClipboardItem::new_string(content.to_string()));
+        self.after_copy_hide(cx);
+    }
+
+    fn copy_entry_and_hide(&mut self, entry: &ClipboardEntry, cx: &mut Context<Self>) {
+        match push_entry_to_system_clipboard(entry) {
+            Ok(item) => {
+                cx.write_to_clipboard(item);
+                self.after_copy_hide(cx);
+            }
+            Err(err) => {
+                self.status = format!("copy failed: {err}").into();
+                cx.notify();
+            }
+        }
+    }
+
+    fn after_copy_hide(&mut self, cx: &mut Context<Self>) {
         self.mode = UiMode::Search;
         self.query.clear();
         self.selected = 0;
-        self.status = format!("copied · {label} to reopen", label = toggle_label()).into();
+        self.status = format!("pasted · {label} to reopen", label = toggle_label()).into();
         cx.hide();
+        // Give the previous app a beat to regain focus, then synthesize ⌘V.
+        cx.spawn(async move |_this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            crate::paste::activate_previous_and_paste();
+        })
+        .detach();
     }
 
     /// Called when the popup is shown via hotkey.
@@ -529,7 +568,7 @@ impl StashApp {
                     .text_size(px(11.))
                     .text_color(rgb(MUTED))
                     .child(format!(
-                        "<esc> hide   <tab> actions   <enter> copy   {} toggle",
+                        "<esc> hide   <tab> actions   <enter> paste   {} toggle",
                         toggle_label()
                     )),
             )
@@ -1113,6 +1152,8 @@ pub fn run() {
 
         cx.on_action(|_: &Quit, cx| cx.quit());
 
+        crate::paste::remember_frontmost_excluding_self();
+
         let hotkeys = match crate::hotkey::HotkeyService::start(&config.hotkey.toggle) {
             Ok(service) => {
                 eprintln!(
@@ -1170,12 +1211,37 @@ pub fn run() {
     });
 }
 
+fn push_entry_to_system_clipboard(entry: &ClipboardEntry) -> Result<ClipboardItem, String> {
+    if let Some(image) = &entry.image {
+        let bytes = std::fs::read(&image.path)
+            .map_err(|e| format!("read image {}: {e}", image.path.display()))?;
+        if bytes.is_empty() {
+            return Err("image blob is empty".into());
+        }
+        crate::clipboard::write_png(&bytes)?;
+        Ok(ClipboardItem::new_image(&Image::from_bytes(
+            ImageFormat::Png,
+            bytes,
+        )))
+    } else if entry.content.is_empty() {
+        Err("entry has no content".into())
+    } else {
+        crate::clipboard::write_text(&entry.content)?;
+        Ok(ClipboardItem::new_string(entry.content.clone()))
+    }
+}
+
+fn clipboard_item_for_entry(entry: &ClipboardEntry) -> Result<ClipboardItem, String> {
+    push_entry_to_system_clipboard(entry)
+}
+
 fn toggle_popup(window: gpui::WindowHandle<StashApp>, cx: &mut App) {
     let hidden = crate::hotkey::app_is_hidden();
     let handle: AnyWindowHandle = window.into();
     let ours_active = cx.active_window() == Some(handle);
 
     if hidden || !ours_active {
+        crate::paste::remember_frontmost_excluding_self();
         cx.activate(true);
         let _ = window.update(cx, |app, window, cx| {
             app.prepare_for_show(cx);
