@@ -15,6 +15,7 @@ pub enum ContentType {
     ShellCommand,
     StackTrace,
     GitHubUrl,
+    Image,
 }
 
 impl ContentType {
@@ -30,20 +31,22 @@ impl ContentType {
             Self::ShellCommand => "shell",
             Self::StackTrace => "trace",
             Self::GitHubUrl => "github",
+            Self::Image => "image",
         }
     }
 
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::PlainText => "Aa",
-            Self::Url | Self::GitHubUrl => "🔗",
+            Self::PlainText => "txt",
+            Self::Url | Self::GitHubUrl => "url",
             Self::Json => "{}",
-            Self::Jwt => "JWT",
-            Self::Uuid => "ID",
-            Self::GitSha => "#",
-            Self::FilePath => "/",
-            Self::ShellCommand => "$",
-            Self::StackTrace => "📝",
+            Self::Jwt => "jwt",
+            Self::Uuid => "id ",
+            Self::GitSha => "sha",
+            Self::FilePath => " / ",
+            Self::ShellCommand => " $ ",
+            Self::StackTrace => "err",
+            Self::Image => "img",
         }
     }
 }
@@ -67,6 +70,15 @@ pub struct SourceContext {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
+pub struct ImageMeta {
+    pub width: u32,
+    pub height: u32,
+    pub label: String,
+    pub accent: u32,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ClipboardEntry {
     pub id: String,
     pub created_at: DateTime<Utc>,
@@ -76,6 +88,7 @@ pub struct ClipboardEntry {
     pub source: SourceContext,
     pub copy_count: u32,
     pub pinned: bool,
+    pub image: Option<ImageMeta>,
 }
 
 impl ClipboardEntry {
@@ -86,7 +99,17 @@ impl ClipboardEntry {
             .unwrap_or(ContentType::PlainText)
     }
 
+    pub fn is_image(&self) -> bool {
+        self.image.is_some() || self.detected_types.contains(&ContentType::Image)
+    }
+
     pub fn preview_line(&self, max_chars: usize) -> String {
+        if let Some(image) = &self.image {
+            return format!(
+                "[{} · {}×{}]",
+                image.label, image.width, image.height
+            );
+        }
         let flat: String = self
             .content
             .chars()
@@ -101,22 +124,6 @@ impl ClipboardEntry {
         }
     }
 
-    pub fn context_line(&self) -> Option<String> {
-        let mut parts = Vec::new();
-        parts.push(self.source.app_name.clone());
-        if let Some(repo) = &self.source.git_repo {
-            parts.push(repo.clone());
-        }
-        if let Some(branch) = &self.source.git_branch {
-            parts.push(branch.clone());
-        }
-        if parts.len() > 1 {
-            Some(parts.join(" · "))
-        } else {
-            None
-        }
-    }
-
     pub fn age_label(&self, now: DateTime<Utc>) -> String {
         let secs = (now - self.last_copied_at).num_seconds().max(0);
         if secs < 60 {
@@ -128,6 +135,14 @@ impl ClipboardEntry {
         } else {
             format!("{}d", secs / 86400)
         }
+    }
+
+    pub fn age_ago_label(&self, now: DateTime<Utc>) -> String {
+        format!("{} ago", self.age_label(now))
+    }
+
+    pub fn format_timestamp(&self, at: DateTime<Utc>) -> String {
+        at.format("%d %b %Y at %H:%M").to_string()
     }
 }
 

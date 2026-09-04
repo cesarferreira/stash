@@ -1,12 +1,40 @@
 //! PRD-derived in-memory sample clipboard history.
 
-use crate::model::{ClipboardEntry, ContentType, SourceContext};
+use crate::model::{ClipboardEntry, ContentType, ImageMeta, SourceContext};
 use chrono::{Duration, Utc};
 
 pub fn sample_entries() -> Vec<ClipboardEntry> {
     let now = Utc::now();
 
     vec![
+        image_entry(
+            "img01",
+            now - Duration::seconds(20),
+            "Screenshot of Atuin history popup",
+            ImageMeta {
+                width: 918,
+                height: 512,
+                label: "Atuin screenshot".into(),
+                accent: 0xff2d7b,
+            },
+            ghostty("stash", "main"),
+            1,
+            false,
+        ),
+        image_entry(
+            "img02",
+            now - Duration::minutes(6),
+            "Design mock — Maccy + Atuin mix",
+            ImageMeta {
+                width: 1280,
+                height: 800,
+                label: "UI mock".into(),
+                accent: 0x7aa2f7,
+            },
+            chrome(),
+            2,
+            true,
+        ),
         entry(
             "e01",
             now - Duration::seconds(12),
@@ -83,11 +111,7 @@ pub fn sample_entries() -> Vec<ClipboardEntry> {
             "e09",
             now - Duration::minutes(15),
             "https://github.com/foo/bar/commit/a3c87f9e2b1d4c6f8a0e5b7d9c1f3a5e7b9d1c3f",
-            &[
-                ContentType::GitHubUrl,
-                ContentType::Url,
-                ContentType::GitSha,
-            ],
+            &[ContentType::GitHubUrl, ContentType::Url, ContentType::GitSha],
             arc(Some("stax"), Some("main")),
             1,
             false,
@@ -194,6 +218,29 @@ fn entry(
         source,
         copy_count,
         pinned,
+        image: None,
+    }
+}
+
+fn image_entry(
+    id: &str,
+    at: chrono::DateTime<Utc>,
+    content: &str,
+    image: ImageMeta,
+    source: SourceContext,
+    copy_count: u32,
+    pinned: bool,
+) -> ClipboardEntry {
+    ClipboardEntry {
+        id: id.to_string(),
+        created_at: at,
+        last_copied_at: at,
+        content: content.to_string(),
+        detected_types: vec![ContentType::Image],
+        source,
+        copy_count,
+        pinned,
+        image: Some(image),
     }
 }
 

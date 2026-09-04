@@ -103,6 +103,10 @@ fn searchable_text(entry: &ClipboardEntry) -> String {
     if let Some(host) = &entry.source.hostname {
         parts.push(host.clone());
     }
+    if let Some(image) = &entry.image {
+        parts.push(image.label.clone());
+        parts.push("image".into());
+    }
     if entry.pinned {
         parts.push("pinned".into());
     }

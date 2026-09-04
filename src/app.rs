@@ -1,15 +1,16 @@
-//! Interactive Atuin/fzf-inspired clipboard popup.
+//! Maccy-simple list + Atuin colors, with a right-hand preview pane.
 
-use crate::model::{ClipboardEntry, PrototypeAction, UiMode, actions_for};
+use crate::model::{
+    ClipboardEntry, ContentType, PrototypeAction, UiMode, actions_for,
+};
 use crate::sample_data::sample_entries;
 use crate::search::{SearchContext, search_entries};
-use crate::text_input::TextInput;
 use crate::transform::{TransformKind, openable_url, transform_entry};
 use chrono::Utc;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, SharedString,
-    Window, WindowBounds, WindowDecorations, WindowKind, WindowOptions, actions, div, prelude::*,
-    px, rgb, rgba, size,
+    App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, KeyBinding, KeyDownEvent,
+    SharedString, Window, WindowBounds, WindowDecorations, WindowKind, WindowOptions, actions, div,
+    prelude::*, px, rgb, rgba, size,
 };
 
 actions!(
@@ -24,17 +25,40 @@ actions!(
         TogglePin,
         DeleteEntry,
         CopySelected,
+        BackspaceChar,
+        ClearQuery,
+        PasteIndex1,
+        PasteIndex2,
+        PasteIndex3,
+        PasteIndex4,
+        PasteIndex5,
+        PasteIndex6,
+        PasteIndex7,
+        PasteIndex8,
+        PasteIndex9,
         Quit,
     ]
 );
 
+// Atuin-ish accents on a Maccy-dark chrome.
+const BG: u32 = 0x121018;
+const PANEL: u32 = 0x1a1824;
+const SURFACE: u32 = 0x221f2e;
+const BORDER: u32 = 0x2e2a3a;
+const TEXT: u32 = 0xe8e6f0;
+const MUTED: u32 = 0x8b8798;
+const DIM: u32 = 0x5c5868;
+const PINK: u32 = 0xff2d7b;
+const CYAN: u32 = 0x7dcfff;
+const GREEN: u32 = 0x9ece6a;
+const SELECT: u32 = 0x2a2035;
+
 pub struct StashApp {
     entries: Vec<ClipboardEntry>,
-    query: SharedString,
+    query: String,
+    edit_buffer: String,
     selected: usize,
     mode: UiMode,
-    search_input: Entity<TextInput>,
-    edit_input: Entity<TextInput>,
     focus_handle: FocusHandle,
     search_ctx: SearchContext,
     status: SharedString,
@@ -43,38 +67,15 @@ pub struct StashApp {
 
 impl StashApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let focus_handle = cx.focus_handle();
-        let this = cx.weak_entity();
-
-        let search_input = cx.new(|cx| {
-            let mut input = TextInput::new(cx, "search clipboard history…");
-            let this = this.clone();
-            input.on_change = Some(Box::new(move |text, cx| {
-                this.update(cx, |app, cx| {
-                    if app.mode == UiMode::Search {
-                        app.query = text.to_string().into();
-                        app.selected = 0;
-                        cx.notify();
-                    }
-                })
-                .ok();
-            }));
-            input
-        });
-
-        let edit_input = cx.new(|cx| TextInput::new(cx, "edit before paste…"));
-
         Self {
             entries: sample_entries(),
-            query: "".into(),
+            query: String::new(),
+            edit_buffer: String::new(),
             selected: 0,
             mode: UiMode::Search,
-            search_input,
-            edit_input,
-            focus_handle,
+            focus_handle: cx.focus_handle(),
             search_ctx: SearchContext::default(),
-            status: "↑↓ navigate   ↵ paste   ⇥ actions   ⌘e edit   ⌘p pin   ⌘d delete   esc close"
-                .into(),
+            status: SharedString::from(""),
             action_selected: 0,
         }
     }
@@ -106,18 +107,68 @@ impl StashApp {
         }
     }
 
-    fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+    fn active_buffer_mut(&mut self) -> &mut String {
+        match self.mode {
+            UiMode::Edit => &mut self.edit_buffer,
+            _ => &mut self.query,
+        }
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == UiMode::Actions {
+            return;
+        }
+        let mods = &event.keystroke.modifiers;
+        if mods.platform || mods.control || mods.secondary() {
+            return;
+        }
+        let Some(ch) = event.keystroke.key_char.as_deref() else {
+            return;
+        };
+        if ch.is_empty() || ch.chars().any(|c| c.is_control()) {
+            return;
+        }
+        match event.keystroke.key.as_str() {
+            "up" | "down" | "left" | "right" | "enter" | "escape" | "tab" | "backspace"
+            | "delete" => return,
+            _ => {}
+        }
+        self.active_buffer_mut().push_str(ch);
+        if self.mode == UiMode::Search {
+            self.selected = 0;
+        }
+        cx.notify();
+    }
+
+    fn backspace_char(&mut self, _: &BackspaceChar, _: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.mode, UiMode::Search | UiMode::Edit) {
+            self.active_buffer_mut().pop();
+            if self.mode == UiMode::Search {
+                self.selected = 0;
+            }
+            cx.notify();
+        }
+    }
+
+    fn clear_query(&mut self, _: &ClearQuery, _: &mut Window, cx: &mut Context<Self>) {
         match self.mode {
             UiMode::Search => {
-                if self.selected > 0 {
-                    self.selected -= 1;
-                }
+                self.query.clear();
+                self.selected = 0;
+                cx.notify();
             }
-            UiMode::Actions => {
-                if self.action_selected > 0 {
-                    self.action_selected -= 1;
-                }
+            UiMode::Edit => {
+                self.edit_buffer.clear();
+                cx.notify();
             }
+            UiMode::Actions => {}
+        }
+    }
+
+    fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+        match self.mode {
+            UiMode::Search => self.selected = self.selected.saturating_sub(1),
+            UiMode::Actions => self.action_selected = self.action_selected.saturating_sub(1),
             UiMode::Edit => {}
         }
         cx.notify();
@@ -147,29 +198,40 @@ impl StashApp {
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
         match self.mode {
             UiMode::Search => {
-                if let Some(content) = self.selected_entry().map(|e| e.content.clone()) {
+                if let Some(content) = self.paste_payload() {
                     self.copy_and_close(&content, window, cx);
                 }
             }
             UiMode::Actions => self.run_selected_action(window, cx),
             UiMode::Edit => {
-                let content = self.edit_input.read(cx).content().to_string();
+                let content = self.edit_buffer.clone();
                 self.copy_and_close(&content, window, cx);
             }
         }
     }
 
-    fn open_actions(&mut self, _: &OpenActions, window: &mut Window, cx: &mut Context<Self>) {
+    fn paste_payload(&self) -> Option<String> {
+        self.selected_entry().map(|entry| entry.content.clone())
+    }
+
+    fn paste_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if self.mode != UiMode::Search {
             return;
         }
-        if self.selected_entry().is_some() {
-            self.mode = UiMode::Actions;
-            self.action_selected = 0;
-            self.status = "↑↓ choose action   ↵ run   esc back".into();
-            window.focus(&self.focus_handle, cx);
-            cx.notify();
+        let indices = self.ranked_indices();
+        if let Some(&entry_idx) = indices.get(index) {
+            let content = self.entries[entry_idx].content.clone();
+            self.copy_and_close(&content, window, cx);
         }
+    }
+
+    fn open_actions(&mut self, _: &OpenActions, _: &mut Window, cx: &mut Context<Self>) {
+        if self.mode != UiMode::Search || self.selected_entry().is_none() {
+            return;
+        }
+        self.mode = UiMode::Actions;
+        self.action_selected = 0;
+        cx.notify();
     }
 
     fn close(&mut self, _: &Close, window: &mut Window, cx: &mut Context<Self>) {
@@ -180,38 +242,28 @@ impl StashApp {
             }
             UiMode::Actions | UiMode::Edit => {
                 self.mode = UiMode::Search;
-                self.status =
-                    "↑↓ navigate   ↵ paste   ⇥ actions   ⌘e edit   ⌘p pin   ⌘d delete   esc close"
-                        .into();
-                window.focus(&self.search_input.focus_handle(cx), cx);
                 cx.notify();
             }
         }
     }
 
-    fn edit_before_paste(
-        &mut self,
-        _: &EditBeforePaste,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(content) = self.selected_entry().map(|e| e.content.clone()) else {
+    fn edit_before_paste(&mut self, _: &EditBeforePaste, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(entry) = self.selected_entry() else {
             return;
         };
+        if entry.is_image() {
+            self.status = "images are not editable in this prototype".into();
+            cx.notify();
+            return;
+        }
+        self.edit_buffer = entry.content.clone();
         self.mode = UiMode::Edit;
-        self.edit_input.update(cx, |input, cx| {
-            input.set_content(content, cx);
-        });
-        self.status = "↵ paste edited value             esc cancel".into();
-        window.focus(&self.edit_input.focus_handle(cx), cx);
         cx.notify();
     }
 
     fn toggle_pin(&mut self, _: &TogglePin, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.selected_entry_mut() {
             entry.pinned = !entry.pinned;
-            let label = if entry.pinned { "pinned" } else { "unpinned" };
-            self.status = format!("{label} · ⌘p to toggle").into();
             cx.notify();
         }
     }
@@ -224,15 +276,14 @@ impl StashApp {
             if self.mode == UiMode::Actions {
                 self.mode = UiMode::Search;
             }
-            self.status = "deleted".into();
             cx.notify();
         }
     }
 
     fn copy_selected(&mut self, _: &CopySelected, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(content) = self.selected_entry().map(|e| e.content.clone()) {
+        if let Some(content) = self.paste_payload() {
             cx.write_to_clipboard(ClipboardItem::new_string(content));
-            self.status = "copied (popup stays open)".into();
+            self.status = "copied".into();
             cx.notify();
         }
     }
@@ -245,7 +296,6 @@ impl StashApp {
         let Some(action) = actions.get(self.action_selected).copied() else {
             return;
         };
-
         match action {
             PrototypeAction::Paste | PrototypeAction::Copy => {
                 self.copy_and_close(&entry.content, window, cx);
@@ -265,7 +315,6 @@ impl StashApp {
             PrototypeAction::OpenUrl => {
                 if let Some(url) = openable_url(&entry) {
                     cx.open_url(url);
-                    self.status = "opened URL".into();
                     self.mode = UiMode::Search;
                     cx.notify();
                 }
@@ -276,12 +325,10 @@ impl StashApp {
             PrototypeAction::Pin => {
                 self.toggle_pin(&TogglePin, window, cx);
                 self.mode = UiMode::Search;
-                window.focus(&self.search_input.focus_handle(cx), cx);
             }
             PrototypeAction::Delete => {
                 self.delete_entry(&DeleteEntry, window, cx);
                 self.mode = UiMode::Search;
-                window.focus(&self.search_input.focus_handle(cx), cx);
             }
         }
     }
@@ -308,135 +355,535 @@ impl StashApp {
         cx.quit();
     }
 
-    fn render_result_row(
-        &self,
-        entry: &ClipboardEntry,
-        selected: bool,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> impl IntoElement {
-        let age = entry.age_label(now);
-        let glyph = entry.primary_type().glyph();
-        let preview = entry.preview_line(64);
-        let source = entry.source.app_name.clone();
-        let pin = if entry.pinned { " ★" } else { "" };
-        let count = if entry.copy_count > 1 {
-            format!(" ×{}", entry.copy_count)
-        } else {
-            String::new()
-        };
-        let context = entry.context_line();
+    fn type_color(ty: ContentType) -> u32 {
+        match ty {
+            ContentType::ShellCommand => GREEN,
+            ContentType::Json => 0xe0af68,
+            ContentType::Url | ContentType::GitHubUrl => CYAN,
+            ContentType::StackTrace => PINK,
+            ContentType::Jwt => 0xbb9af7,
+            ContentType::Image => 0x7aa2f7,
+            ContentType::GitSha | ContentType::Uuid => 0x73daca,
+            ContentType::FilePath => 0xff9e64,
+            ContentType::PlainText => MUTED,
+        }
+    }
 
-        let bg = if selected {
-            rgba(0x3d59a155)
-        } else {
-            rgba(0x00000000)
+    fn render_header(&self) -> impl IntoElement {
+        let tab = match self.mode {
+            UiMode::Search => "Search",
+            UiMode::Actions => "Actions",
+            UiMode::Edit => "Edit",
         };
-        let fg = if selected {
-            rgb(0xc0caf5)
-        } else {
-            rgb(0xa9b1d6)
-        };
-        let muted = rgb(0x565f89);
-
         div()
             .flex()
-            .flex_col()
-            .w_full()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .bg(bg)
+            .items_center()
+            .justify_between()
+            .px_4()
+            .h(px(40.))
+            .bg(rgb(PANEL))
+            .border_b_1()
+            .border_color(rgb(BORDER))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(div().w(px(36.)).text_color(muted).text_sm().child(age))
                     .child(
                         div()
-                            .w(px(36.))
-                            .text_color(rgb(0x7aa2f7))
-                            .text_sm()
-                            .child(glyph.to_string()),
+                            .font_family("Menlo")
+                            .text_size(px(13.))
+                            .text_color(rgb(PINK))
+                            .child("stash 0.1.0"),
                     )
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_color(fg)
-                            .text_sm()
-                            .child(format!("{preview}{count}{pin}")),
+                            .font_family("Menlo")
+                            .text_size(px(12.))
+                            .text_color(rgb(TEXT))
+                            .child(tab),
                     )
-                    .child(div().text_color(muted).text_sm().child(source)),
+                    .child(
+                        div()
+                            .font_family("Menlo")
+                            .text_size(px(12.))
+                            .text_color(rgb(DIM))
+                            .child("| Inspect"),
+                    ),
             )
-            .when_some(context, |this, context| {
-                this.child(div().pl(px(75.)).text_xs().text_color(muted).child(context))
-            })
-    }
-
-    fn render_actions_panel(&self) -> impl IntoElement {
-        let actions = self.selected_entry().map(actions_for).unwrap_or_default();
-
-        div()
-            .id("actions")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .p_3()
-            .gap_1()
-            .overflow_y_scroll()
             .child(
                 div()
-                    .text_sm()
-                    .text_color(rgb(0x7aa2f7))
-                    .mb_2()
-                    .child("Actions"),
+                    .font_family("Menlo")
+                    .text_size(px(11.))
+                    .text_color(rgb(MUTED))
+                    .child("<esc> exit   <tab> actions   <enter> paste"),
             )
-            .children(actions.into_iter().enumerate().map(|(idx, action)| {
-                let selected = idx == self.action_selected;
-                div()
-                    .px_3()
-                    .py_2()
-                    .rounded_md()
-                    .bg(if selected {
-                        rgba(0x3d59a155)
-                    } else {
-                        rgba(0x00000000)
-                    })
-                    .text_color(if selected {
-                        rgb(0xc0caf5)
-                    } else {
-                        rgb(0xa9b1d6)
-                    })
-                    .child(action.label())
-            }))
     }
 
-    fn render_edit_panel(&self) -> impl IntoElement {
+    fn render_list_row(
+        &self,
+        entry: &ClipboardEntry,
+        row: usize,
+        selected: bool,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> impl IntoElement {
+        let age = entry.age_ago_label(now);
+        let ty = entry.primary_type();
+        let shortcut = if row < 9 {
+            format!("⌘{}", row + 1)
+        } else {
+            String::new()
+        };
+        let pin = if entry.pinned { "*" } else { " " };
+        let marker = if selected { ">" } else { " " };
+
         div()
             .flex()
-            .flex_col()
-            .flex_1()
-            .p_4()
-            .gap_3()
+            .items_center()
+            .gap_2()
+            .w_full()
+            .px_2()
+            .py_1p5()
+            .rounded_sm()
+            .bg(if selected { rgb(SELECT) } else { rgb(BG) })
             .child(
                 div()
-                    .text_sm()
-                    .text_color(rgb(0x7aa2f7))
-                    .child("Edit before paste"),
+                    .w(px(12.))
+                    .font_family("Menlo")
+                    .text_size(px(13.))
+                    .text_color(rgb(PINK))
+                    .child(marker),
+            )
+            .child(
+                // Thumbnail / type chip
+                if entry.is_image() {
+                    let accent = entry.image.as_ref().map(|i| i.accent).unwrap_or(0x7aa2f7);
+                    div()
+                        .w(px(34.))
+                        .h(px(26.))
+                        .rounded_sm()
+                        .bg(rgb(accent))
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .font_family("Menlo")
+                                .text_size(px(9.))
+                                .text_color(rgb(TEXT))
+                                .child("IMG"),
+                        )
+                } else {
+                    div()
+                        .w(px(34.))
+                        .font_family("Menlo")
+                        .text_size(px(12.))
+                        .text_color(rgb(Self::type_color(ty)))
+                        .child(ty.glyph().to_string())
+                },
+            )
+            .child(
+                div()
+                    .w(px(58.))
+                    .font_family("Menlo")
+                    .text_size(px(12.))
+                    .text_color(rgb(CYAN))
+                    .child(age),
             )
             .child(
                 div()
                     .flex_1()
-                    .w_full()
-                    .p_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(0x3b4261))
-                    .bg(rgb(0x1a1b26))
-                    .child(self.edit_input.clone()),
+                    .min_w_0()
+                    .font_family("Menlo")
+                    .text_size(px(13.))
+                    .text_color(if selected { rgb(PINK) } else { rgb(TEXT) })
+                    .child(format!("{pin}{}", entry.preview_line(42))),
             )
+            .child(
+                div()
+                    .w(px(36.))
+                    .font_family("Menlo")
+                    .text_size(px(11.))
+                    .text_color(rgb(DIM))
+                    .child(shortcut),
+            )
+    }
+
+    fn render_preview(&self, now: chrono::DateTime<chrono::Utc>) -> impl IntoElement {
+        let entry = self.selected_entry().cloned();
+
+        div()
+            .flex()
+            .flex_col()
+            .w(px(360.))
+            .h_full()
+            .bg(rgb(PANEL))
+            .border_l_1()
+            .border_color(rgb(BORDER))
+            .child(
+                // Preview toolbar
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .h(px(36.))
+                    .border_b_1()
+                    .border_color(rgb(BORDER))
+                    .child(
+                        div()
+                            .font_family("Menlo")
+                            .text_size(px(11.))
+                            .text_color(rgb(MUTED))
+                            .child("preview"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_3()
+                            .font_family("Menlo")
+                            .text_size(px(11.))
+                            .text_color(rgb(DIM))
+                            .child("⌘p pin")
+                            .child("⌘d del"),
+                    ),
+            )
+            .child(
+                // Content area
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .p_3()
+                    .gap_3()
+                    .when_some(entry.clone(), |this, entry| {
+                        this.child(self.render_preview_body(&entry))
+                            .child(self.render_metadata(&entry, now))
+                    })
+                    .when(entry.is_none(), |this| {
+                        this.child(
+                            div()
+                                .flex_1()
+                                .items_center()
+                                .justify_center()
+                                .font_family("Menlo")
+                                .text_color(rgb(DIM))
+                                .child("no selection"),
+                        )
+                    }),
+            )
+    }
+
+    fn render_preview_body(&self, entry: &ClipboardEntry) -> impl IntoElement {
+        if let Some(image) = &entry.image {
+            div()
+                .id("preview-image")
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h(px(180.))
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(SURFACE))
+                .overflow_hidden()
+                .child(
+                    div()
+                        .flex_1()
+                        .w_full()
+                        .bg(rgb(image.accent))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .font_family("Menlo")
+                                .text_size(px(14.))
+                                .text_color(rgb(TEXT))
+                                .child(image.label.clone()),
+                        )
+                        .child(
+                            div()
+                                .font_family("Menlo")
+                                .text_size(px(11.))
+                                .text_color(rgb(TEXT))
+                                .opacity(0.7)
+                                .child(format!("{}×{}", image.width, image.height)),
+                        )
+                        .child(
+                            div()
+                                .mt_2()
+                                .px_3()
+                                .py_2()
+                                .rounded_sm()
+                                .bg(rgb(0x000000))
+                                .opacity(0.45)
+                                .font_family("Menlo")
+                                .text_size(px(10.))
+                                .text_color(rgb(TEXT))
+                                .child(
+                                    "  14s   8h ago   git init\n  32ms  2h ago   cargo run\n> 50s  50s ago   stash",
+                                ),
+                        ),
+                )
+        } else {
+            let pretty = if entry.primary_type() == ContentType::Json {
+                crate::transform::pretty_json(&entry.content)
+                    .unwrap_or_else(|_| entry.content.clone())
+            } else {
+                entry.content.clone()
+            };
+            div()
+                .id("preview-text")
+                .flex_1()
+                .min_h(px(180.))
+                .w_full()
+                .p_3()
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(SURFACE))
+                .overflow_y_scroll()
+                .font_family("Menlo")
+                .text_size(px(12.))
+                .text_color(rgb(TEXT))
+                .child(pretty)
+        }
+    }
+
+    fn render_metadata(
+        &self,
+        entry: &ClipboardEntry,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> impl IntoElement {
+        let ty = entry
+            .detected_types
+            .iter()
+            .map(|t| t.label())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let mut meta_rows = vec![
+            ("Application", entry.source.app_name.clone()),
+            ("Type", ty),
+        ];
+        if let Some(image) = &entry.image {
+            meta_rows.push((
+                "Dimensions",
+                format!("{}×{}", image.width, image.height),
+            ));
+        }
+        if let Some(repo) = &entry.source.git_repo {
+            let branch = entry
+                .source
+                .git_branch
+                .as_deref()
+                .unwrap_or("-");
+            meta_rows.push(("Repository", format!("{repo} · {branch}")));
+        }
+        meta_rows.push((
+            "First copy",
+            entry.format_timestamp(entry.created_at),
+        ));
+        meta_rows.push((
+            "Last copy",
+            entry.format_timestamp(entry.last_copied_at),
+        ));
+        meta_rows.push(("Copies", entry.copy_count.to_string()));
+        if entry.pinned {
+            meta_rows.push(("Pinned", "yes".into()));
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .pt_1()
+            .children(meta_rows.into_iter().map(|(label, value)| {
+                div()
+                    .flex()
+                    .gap_3()
+                    .font_family("Menlo")
+                    .text_size(px(11.))
+                    .child(
+                        div()
+                            .w(px(92.))
+                            .text_color(rgb(MUTED))
+                            .child(label),
+                    )
+                    .child(div().flex_1().text_color(rgb(TEXT)).child(value))
+            }))
+    }
+
+    fn render_actions_overlay(&self) -> impl IntoElement {
+        let actions = self.selected_entry().map(actions_for).unwrap_or_default();
+        div()
+            .id("actions")
+            .absolute()
+            .inset_0()
+            .bg(rgba(0x0a0810ee))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("actions-panel")
+                    .w(px(360.))
+                    .max_h(px(360.))
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(BORDER))
+                    .bg(rgb(PANEL))
+                    .p_3()
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .mb_2()
+                            .font_family("Menlo")
+                            .text_size(px(12.))
+                            .text_color(rgb(PINK))
+                            .child("actions"),
+                    )
+                    .children(actions.into_iter().enumerate().map(|(idx, action)| {
+                        let selected = idx == self.action_selected;
+                        div()
+                            .px_3()
+                            .py_2()
+                            .rounded_sm()
+                            .bg(if selected { rgb(SELECT) } else { rgb(PANEL) })
+                            .font_family("Menlo")
+                            .text_size(px(13.))
+                            .text_color(if selected { rgb(PINK) } else { rgb(TEXT) })
+                            .child(format!(
+                                "{} {}",
+                                if selected { ">" } else { " " },
+                                action.label()
+                            ))
+                    })),
+            )
+    }
+
+    fn render_edit_overlay(&self) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .bg(rgba(0x0a0810ee))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .w(px(520.))
+                    .h(px(280.))
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(BORDER))
+                    .bg(rgb(PANEL))
+                    .p_4()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .font_family("Menlo")
+                            .text_size(px(12.))
+                            .text_color(rgb(PINK))
+                            .child("edit before paste"),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .p_3()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgb(BORDER))
+                            .bg(rgb(SURFACE))
+                            .font_family("Menlo")
+                            .text_size(px(13.))
+                            .text_color(rgb(TEXT))
+                            .child(format!("{}▌", self.edit_buffer)),
+                    )
+                    .child(
+                        div()
+                            .font_family("Menlo")
+                            .text_size(px(11.))
+                            .text_color(rgb(MUTED))
+                            .child("<enter> paste edited   <esc> cancel   <ctrl-u> clear"),
+                    ),
+            )
+    }
+
+    fn render_search_footer(&self) -> impl IntoElement {
+        let mode_badge = match self.mode {
+            UiMode::Search => "[ GLOBAL ]",
+            UiMode::Actions => "[ ACTIONS ]",
+            UiMode::Edit => "[ EDIT ]",
+        };
+        let display = if self.mode == UiMode::Edit {
+            String::new()
+        } else {
+            format!("{}▌", self.query)
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .bg(rgb(PANEL))
+            .border_t_1()
+            .border_color(rgb(BORDER))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_4()
+                    .h(px(40.))
+                    .child(
+                        div()
+                            .font_family("Menlo")
+                            .text_size(px(12.))
+                            .text_color(rgb(PINK))
+                            .child(mode_badge),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .font_family("Menlo")
+                            .text_size(px(14.))
+                            .text_color(if self.query.is_empty() {
+                                rgb(DIM)
+                            } else {
+                                rgb(TEXT)
+                            })
+                            .child(if self.query.is_empty() && self.mode == UiMode::Search {
+                                "type to search…▌".to_string()
+                            } else {
+                                display
+                            }),
+                    )
+                    .child(
+                        div()
+                            .font_family("Menlo")
+                            .text_size(px(11.))
+                            .text_color(rgb(DIM))
+                            .child(format!("{} matches", self.ranked_indices().len())),
+                    ),
+            )
+            .when(!self.status.is_empty(), |this| {
+                this.child(
+                    div()
+                        .px_4()
+                        .pb_2()
+                        .font_family("Menlo")
+                        .text_size(px(11.))
+                        .text_color(rgb(MUTED))
+                        .child(self.status.clone()),
+                )
+            })
     }
 }
 
@@ -456,6 +903,7 @@ impl Render for StashApp {
         div()
             .key_context("StashApp")
             .track_focus(&self.focus_handle(cx))
+            .on_key_down(cx.listener(Self::on_key_down))
             .on_action(cx.listener(Self::move_up))
             .on_action(cx.listener(Self::move_down))
             .on_action(cx.listener(Self::confirm))
@@ -465,91 +913,72 @@ impl Render for StashApp {
             .on_action(cx.listener(Self::toggle_pin))
             .on_action(cx.listener(Self::delete_entry))
             .on_action(cx.listener(Self::copy_selected))
+            .on_action(cx.listener(Self::backspace_char))
+            .on_action(cx.listener(Self::clear_query))
+            .on_action(cx.listener(|this, _: &PasteIndex1, w, cx| this.paste_index(0, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex2, w, cx| this.paste_index(1, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex3, w, cx| this.paste_index(2, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex4, w, cx| this.paste_index(3, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex5, w, cx| this.paste_index(4, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex6, w, cx| this.paste_index(5, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex7, w, cx| this.paste_index(6, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex8, w, cx| this.paste_index(7, w, cx)))
+            .on_action(cx.listener(|this, _: &PasteIndex9, w, cx| this.paste_index(8, w, cx)))
+            .relative()
             .flex()
             .flex_col()
             .size_full()
-            .bg(rgb(0x1a1b26))
-            .text_color(rgb(0xc0caf5))
-            .font_family(".SystemUIFont")
+            .bg(rgb(BG))
+            .text_color(rgb(TEXT))
+            .border_1()
+            .border_color(rgb(BORDER))
+            .rounded_xl()
+            .overflow_hidden()
+            .child(self.render_header())
             .child(
-                // Search bar
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .border_b_1()
-                    .border_color(rgb(0x3b4261))
-                    .child(div().text_color(rgb(0x7aa2f7)).text_lg().child(">"))
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_lg()
-                            .when(self.mode == UiMode::Search, |this| {
-                                this.child(self.search_input.clone())
-                            })
-                            .when(self.mode != UiMode::Search, |this| {
-                                this.text_color(rgb(0x565f89))
-                                    .child(if self.query.is_empty() {
-                                        "search clipboard history…".to_string()
-                                    } else {
-                                        self.query.to_string()
-                                    })
-                            }),
-                    ),
-            )
-            .child(
-                // Body
                 div()
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .when(self.mode == UiMode::Search, |this| {
-                        this.child(
-                            div()
-                                .id("results")
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .min_h_0()
-                                .p_2()
-                                .gap_1()
-                                .overflow_y_scroll()
-                                .when(indices.is_empty(), |this| {
-                                    this.child(
-                                        div()
-                                            .flex_1()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_color(rgb(0x565f89))
-                                            .child("No matches"),
-                                    )
-                                })
-                                .children(indices.into_iter().enumerate().map(|(row, idx)| {
-                                    let entry = &self.entries[idx];
-                                    self.render_result_row(entry, row == selected, now)
-                                })),
-                        )
-                    })
-                    .when(self.mode == UiMode::Actions, |this| {
-                        this.child(self.render_actions_panel())
-                    })
-                    .when(self.mode == UiMode::Edit, |this| {
-                        this.child(self.render_edit_panel())
-                    }),
+                    .child(
+                        // Left list — Maccy density + Atuin columns
+                        div()
+                            .id("results")
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .px_2()
+                            .py_2()
+                            .gap_0p5()
+                            .overflow_y_scroll()
+                            .when(indices.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .flex()
+                                        .flex_1()
+                                        .items_center()
+                                        .justify_center()
+                                        .font_family("Menlo")
+                                        .text_color(rgb(DIM))
+                                        .child("no matches"),
+                                )
+                            })
+                            .children(indices.into_iter().enumerate().map(|(row, idx)| {
+                                let entry = &self.entries[idx];
+                                self.render_list_row(entry, row, row == selected, now)
+                            })),
+                    )
+                    .child(self.render_preview(now)),
             )
-            .child(
-                // Footer
-                div()
-                    .px_4()
-                    .py_2()
-                    .border_t_1()
-                    .border_color(rgb(0x3b4261))
-                    .text_xs()
-                    .text_color(rgb(0x565f89))
-                    .child(self.status.clone()),
-            )
+            .child(self.render_search_footer())
+            .when(self.mode == UiMode::Actions, |this| {
+                this.child(self.render_actions_overlay())
+            })
+            .when(self.mode == UiMode::Edit, |this| {
+                this.child(self.render_edit_overlay())
+            })
     }
 }
 
@@ -567,40 +996,31 @@ pub fn run() {
             KeyBinding::new("cmd-p", TogglePin, Some("StashApp")),
             KeyBinding::new("cmd-d", DeleteEntry, Some("StashApp")),
             KeyBinding::new("cmd-c", CopySelected, Some("StashApp")),
+            KeyBinding::new("backspace", BackspaceChar, Some("StashApp")),
+            KeyBinding::new("ctrl-u", ClearQuery, Some("StashApp")),
+            KeyBinding::new("cmd-1", PasteIndex1, Some("StashApp")),
+            KeyBinding::new("cmd-2", PasteIndex2, Some("StashApp")),
+            KeyBinding::new("cmd-3", PasteIndex3, Some("StashApp")),
+            KeyBinding::new("cmd-4", PasteIndex4, Some("StashApp")),
+            KeyBinding::new("cmd-5", PasteIndex5, Some("StashApp")),
+            KeyBinding::new("cmd-6", PasteIndex6, Some("StashApp")),
+            KeyBinding::new("cmd-7", PasteIndex7, Some("StashApp")),
+            KeyBinding::new("cmd-8", PasteIndex8, Some("StashApp")),
+            KeyBinding::new("cmd-9", PasteIndex9, Some("StashApp")),
             KeyBinding::new("cmd-q", Quit, None),
-            // Text input bindings
-            KeyBinding::new("backspace", crate::text_input::Backspace, Some("TextInput")),
-            KeyBinding::new("delete", crate::text_input::Delete, Some("TextInput")),
-            KeyBinding::new("left", crate::text_input::Left, Some("TextInput")),
-            KeyBinding::new("right", crate::text_input::Right, Some("TextInput")),
-            KeyBinding::new(
-                "shift-left",
-                crate::text_input::SelectLeft,
-                Some("TextInput"),
-            ),
-            KeyBinding::new(
-                "shift-right",
-                crate::text_input::SelectRight,
-                Some("TextInput"),
-            ),
-            KeyBinding::new("cmd-a", crate::text_input::SelectAll, Some("TextInput")),
-            KeyBinding::new("cmd-v", crate::text_input::Paste, Some("TextInput")),
-            KeyBinding::new("cmd-x", crate::text_input::Cut, Some("TextInput")),
-            KeyBinding::new("home", crate::text_input::Home, Some("TextInput")),
-            KeyBinding::new("end", crate::text_input::End, Some("TextInput")),
         ]);
 
         cx.on_action(|_: &Quit, cx| cx.quit());
 
-        let bounds = Bounds::centered(None, size(px(840.), px(520.)), cx);
+        let bounds = Bounds::centered(None, size(px(980.), px(560.)), cx);
         let window = cx
             .open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: None,
                     window_decorations: Some(WindowDecorations::Client),
-                    kind: WindowKind::PopUp,
-                    is_resizable: false,
+                    kind: WindowKind::Floating,
+                    is_resizable: true,
                     is_minimizable: false,
                     ..Default::default()
                 },
@@ -610,35 +1030,9 @@ pub fn run() {
 
         window
             .update(cx, |app, window, cx| {
-                window.focus(&app.search_input.focus_handle(cx), cx);
+                window.focus(&app.focus_handle, cx);
                 cx.activate(true);
             })
             .unwrap();
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn delete_keeps_selection_in_bounds() {
-        let mut entries = sample_entries();
-        assert!(!entries.is_empty());
-        let mut selected = 0usize;
-        entries.remove(0);
-        let len = entries.len();
-        if selected >= len {
-            selected = len.saturating_sub(1);
-        }
-        assert!(selected < entries.len() || entries.is_empty());
-    }
-
-    #[test]
-    fn pin_toggle_flips_flag() {
-        let mut entries = sample_entries();
-        let before = entries[0].pinned;
-        entries[0].pinned = !before;
-        assert_ne!(entries[0].pinned, before);
-    }
 }
