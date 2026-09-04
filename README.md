@@ -15,8 +15,6 @@
     <a href="#quickstart">Quickstart</a>
     &nbsp;·&nbsp;
     <a href="#config">Config</a>
-    &nbsp;·&nbsp;
-    <a href="#development">Development</a>
   </p>
 
   <p>
@@ -87,36 +85,6 @@ Change `toggle` to a lowercase chord (`cmd+shift+v`, `ctrl+alt+s`, …), then re
 History lives at:
 
 `~/Library/Application Support/dev.stash.stash/clipboard.sqlite`
-
-<a id="development"></a>
-## Development
-
-Common tasks via the `Makefile`:
-
-```bash
-make              # check + build + test
-make build        # debug build
-make build-release
-make install      # install debug binary
-make install-release
-make run
-make check        # cargo check + clippy
-make fmt          # format
-make lint         # fmt check + clippy
-make test
-make clean
-make demo         # install + usage hints
-```
-
-Releasing (requires [cargo-release](https://github.com/crate-ci/cargo-release) and [git-cliff](https://github.com/orhun/git-cliff)):
-
-```bash
-make release                  # default minor bump
-make release LEVEL=patch      # patch bump
-make release LEVEL=major      # major bump
-```
-
-The pre-release hook regenerates `CHANGELOG.md` with `git-cliff` from conventional commits (`cliff.toml`) and commits it with the version bump. Pushing the `v*` tag triggers the release workflow, which builds macOS binaries and publishes a GitHub Release.
 
 ## License
 
