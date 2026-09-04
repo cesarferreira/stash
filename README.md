@@ -18,6 +18,10 @@
     &nbsp;·&nbsp;
     <a href="#development">Development</a>
   </p>
+
+  <p>
+    <img src="docs/screenshot.jpg" alt="stash clipboard history popup" width="900">
+  </p>
 </div>
 
 ---
