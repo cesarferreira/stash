@@ -2,9 +2,7 @@
 
 use crate::clipboard::{pasteboard_change_count, read_capture};
 use crate::fonts;
-use crate::model::{
-    ClipboardEntry, ContentType, PrototypeAction, UiMode, actions_for,
-};
+use crate::model::{ClipboardEntry, ContentType, PrototypeAction, UiMode, actions_for};
 use crate::search::{SearchContext, search_entries};
 use crate::selectable_preview::SelectablePreview;
 use crate::store::Store;
@@ -22,10 +20,7 @@ use std::time::Duration;
 static TOGGLE_LABEL: OnceLock<String> = OnceLock::new();
 
 fn toggle_label() -> &'static str {
-    TOGGLE_LABEL
-        .get()
-        .map(String::as_str)
-        .unwrap_or("⌘⇧V")
+    TOGGLE_LABEL.get().map(String::as_str).unwrap_or("⌘⇧V")
 }
 
 actions!(
@@ -521,12 +516,7 @@ impl StashApp {
                             .text_color(rgb(PINK))
                             .child("stash 0.1.0"),
                     )
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(rgb(TEXT))
-                            .child(tab),
-                    )
+                    .child(div().text_size(px(12.)).text_color(rgb(TEXT)).child(tab))
                     .child(
                         div()
                             .text_size(px(12.))
@@ -592,12 +582,7 @@ impl StashApp {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(
-                            div()
-                                .text_size(px(9.))
-                                .text_color(rgb(TEXT))
-                                .child("IMG"),
-                        )
+                        .child(div().text_size(px(9.)).text_color(rgb(TEXT)).child("IMG"))
                 } else {
                     div()
                         .w(px(34.))
@@ -800,32 +785,16 @@ impl StashApp {
             .map(|t| t.label())
             .collect::<Vec<_>>()
             .join(" · ");
-        let mut meta_rows = vec![
-            ("Application", entry.source.app_name.clone()),
-            ("Type", ty),
-        ];
+        let mut meta_rows = vec![("Application", entry.source.app_name.clone()), ("Type", ty)];
         if let Some(image) = &entry.image {
-            meta_rows.push((
-                "Dimensions",
-                format!("{}×{}", image.width, image.height),
-            ));
+            meta_rows.push(("Dimensions", format!("{}×{}", image.width, image.height)));
         }
         if let Some(repo) = &entry.source.git_repo {
-            let branch = entry
-                .source
-                .git_branch
-                .as_deref()
-                .unwrap_or("-");
+            let branch = entry.source.git_branch.as_deref().unwrap_or("-");
             meta_rows.push(("Repository", format!("{repo} · {branch}")));
         }
-        meta_rows.push((
-            "First copy",
-            entry.format_timestamp(entry.created_at),
-        ));
-        meta_rows.push((
-            "Last copy",
-            entry.format_timestamp(entry.last_copied_at),
-        ));
+        meta_rows.push(("First copy", entry.format_timestamp(entry.created_at)));
+        meta_rows.push(("Last copy", entry.format_timestamp(entry.last_copied_at)));
         meta_rows.push(("Copies", entry.copy_count.to_string()));
         if entry.pinned {
             meta_rows.push(("Pinned", "yes".into()));
@@ -841,12 +810,7 @@ impl StashApp {
                     .flex()
                     .gap_3()
                     .text_size(px(11.))
-                    .child(
-                        div()
-                            .w(px(92.))
-                            .text_color(rgb(MUTED))
-                            .child(label),
-                    )
+                    .child(div().w(px(92.)).text_color(rgb(MUTED)).child(label))
                     .child(div().flex_1().text_color(rgb(TEXT)).child(value))
             }))
     }

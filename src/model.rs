@@ -124,10 +124,7 @@ impl ClipboardEntry {
 
     pub fn preview_line(&self, max_chars: usize) -> String {
         if let Some(image) = &self.image {
-            return format!(
-                "[{} · {}×{}]",
-                image.label, image.width, image.height
-            );
+            return format!("[{} · {}×{}]", image.label, image.width, image.height);
         }
         let flat: String = self
             .content

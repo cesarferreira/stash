@@ -17,8 +17,8 @@ impl HotkeyService {
     pub fn start(toggle: &str) -> Result<Self, String> {
         let label = normalize_hotkey(toggle);
         let manager = GlobalHotKeyManager::new().map_err(|e| e.to_string())?;
-        let hotkey = HotKey::from_str(&label)
-            .map_err(|e| format!("invalid hotkey `{label}`: {e}"))?;
+        let hotkey =
+            HotKey::from_str(&label).map_err(|e| format!("invalid hotkey `{label}`: {e}"))?;
         manager
             .register(hotkey)
             .map_err(|e| format!("failed to register `{label}`: {e}"))?;

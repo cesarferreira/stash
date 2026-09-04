@@ -6,9 +6,7 @@ use std::path::PathBuf;
 pub fn data_dir() -> PathBuf {
     directories::ProjectDirs::from("dev", "stash", "stash")
         .map(|dirs| dirs.data_dir().to_path_buf())
-        .unwrap_or_else(|| {
-            dirs_fallback().join("Library/Application Support/stash")
-        })
+        .unwrap_or_else(|| dirs_fallback().join("Library/Application Support/stash"))
 }
 
 fn dirs_fallback() -> PathBuf {
@@ -30,8 +28,5 @@ pub fn db_path() -> PathBuf {
 
 pub fn blob_path_for_hash(content_hash: &str) -> PathBuf {
     let prefix = content_hash.get(..2).unwrap_or("xx");
-    data_dir()
-        .join("blobs")
-        .join(prefix)
-        .join(content_hash)
+    data_dir().join("blobs").join(prefix).join(content_hash)
 }

@@ -109,7 +109,9 @@ pub fn read_capture() -> Option<Capture> {
 }
 
 fn rgba_to_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
-    let expected = (width as usize).checked_mul(height as usize)?.checked_mul(4)?;
+    let expected = (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)?;
     if rgba.len() < expected {
         return None;
     }
@@ -118,12 +120,7 @@ fn rgba_to_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     let encoder = image::codecs::png::PngEncoder::new(&mut out);
     use image::ImageEncoder;
     encoder
-        .write_image(
-            img.as_raw(),
-            width,
-            height,
-            image::ExtendedColorType::Rgba8,
-        )
+        .write_image(img.as_raw(), width, height, image::ExtendedColorType::Rgba8)
         .ok()?;
     Some(out)
 }

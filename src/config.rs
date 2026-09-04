@@ -98,8 +98,8 @@ pub fn load_or_create() -> Result<Config, String> {
     }
 
     let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut config: Config = toml::from_str(&raw)
-        .map_err(|e| format!("invalid config {}: {e}", path.display()))?;
+    let mut config: Config =
+        toml::from_str(&raw).map_err(|e| format!("invalid config {}: {e}", path.display()))?;
     config.hotkey.toggle = normalize_hotkey(&config.hotkey.toggle);
     Ok(config)
 }

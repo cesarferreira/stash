@@ -136,8 +136,6 @@ mod tests {
     fn detects_url_and_json() {
         assert!(detect_types("https://example.com").contains(&ContentType::Url));
         assert!(detect_types(r#"{"a":1}"#).contains(&ContentType::Json));
-        assert!(
-            detect_types("550e8400-e29b-41d4-a716-446655440000").contains(&ContentType::Uuid)
-        );
+        assert!(detect_types("550e8400-e29b-41d4-a716-446655440000").contains(&ContentType::Uuid));
     }
 }

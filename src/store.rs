@@ -292,9 +292,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
 }
 
 fn secs_to_utc(secs: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(secs, 0)
-        .single()
-        .unwrap_or_else(Utc::now)
+    Utc.timestamp_opt(secs, 0).single().unwrap_or_else(Utc::now)
 }
 
 #[cfg(test)]

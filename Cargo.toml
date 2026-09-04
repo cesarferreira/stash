@@ -2,8 +2,11 @@
 name = "stash"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Atuin for your clipboard — instant, searchable, context-aware paste history"
 license = "MIT"
+authors = ["Cesar Ferreira"]
+repository = "https://github.com/cesarferreira/stash"
 publish = false
 
 [[bin]]
@@ -43,3 +46,9 @@ uuid = { version = "1", features = ["v4"] }
 
 [profile.dev]
 debug = 0
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

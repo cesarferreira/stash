@@ -1,4 +1,7 @@
-/target/
-**/*.rs.bk
+/target
 .DS_Store
+*.log
+*.rs.bk
+__pycache__/
+*.pyc
 stash-prototype.png
