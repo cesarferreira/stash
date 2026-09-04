@@ -1,16 +1,18 @@
 //! Maccy-simple list + Atuin colors, with a right-hand preview pane.
 
+use crate::fonts;
 use crate::model::{
     ClipboardEntry, ContentType, PrototypeAction, UiMode, actions_for,
 };
 use crate::sample_data::sample_entries;
 use crate::search::{SearchContext, search_entries};
+use crate::selectable_preview::SelectablePreview;
 use crate::transform::{TransformKind, openable_url, transform_entry};
 use chrono::Utc;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, KeyBinding, KeyDownEvent,
-    SharedString, Window, WindowBounds, WindowDecorations, WindowKind, WindowOptions, actions, div,
-    prelude::*, px, rgb, rgba, size,
+    App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, KeyDownEvent,
+    SharedString, Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind,
+    WindowOptions, actions, div, prelude::*, px, rgb, rgba, size,
 };
 
 actions!(
@@ -45,7 +47,7 @@ const BG: u32 = 0x121018;
 const PANEL: u32 = 0x1a1824;
 const SURFACE: u32 = 0x221f2e;
 const BORDER: u32 = 0x2e2a3a;
-const TEXT: u32 = 0xe8e6f0;
+const TEXT: u32 = 0xd6d4e0;
 const MUTED: u32 = 0x8b8798;
 const DIM: u32 = 0x5c5868;
 const PINK: u32 = 0xff2d7b;
@@ -63,10 +65,13 @@ pub struct StashApp {
     search_ctx: SearchContext,
     status: SharedString,
     action_selected: usize,
+    preview: Entity<SelectablePreview>,
+    preview_entry_id: Option<String>,
 }
 
 impl StashApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let preview = cx.new(SelectablePreview::new);
         Self {
             entries: sample_entries(),
             query: String::new(),
@@ -77,6 +82,8 @@ impl StashApp {
             search_ctx: SearchContext::default(),
             status: SharedString::from(""),
             action_selected: 0,
+            preview,
+            preview_entry_id: None,
         }
     }
 
@@ -281,6 +288,12 @@ impl StashApp {
     }
 
     fn copy_selected(&mut self, _: &CopySelected, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(selected) = self.preview.read(cx).selected_text() {
+            cx.write_to_clipboard(ClipboardItem::new_string(selected));
+            self.status = "copied selection".into();
+            cx.notify();
+            return;
+        }
         if let Some(content) = self.paste_payload() {
             cx.write_to_clipboard(ClipboardItem::new_string(content));
             self.status = "copied".into();
@@ -391,21 +404,18 @@ impl StashApp {
                     .gap_3()
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(13.))
                             .text_color(rgb(PINK))
                             .child("stash 0.1.0"),
                     )
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(12.))
                             .text_color(rgb(TEXT))
                             .child(tab),
                     )
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(12.))
                             .text_color(rgb(DIM))
                             .child("| Inspect"),
@@ -413,7 +423,6 @@ impl StashApp {
             )
             .child(
                 div()
-                    .font_family("Menlo")
                     .text_size(px(11.))
                     .text_color(rgb(MUTED))
                     .child("<esc> exit   <tab> actions   <enter> paste"),
@@ -449,7 +458,6 @@ impl StashApp {
             .child(
                 div()
                     .w(px(12.))
-                    .font_family("Menlo")
                     .text_size(px(13.))
                     .text_color(rgb(PINK))
                     .child(marker),
@@ -470,7 +478,6 @@ impl StashApp {
                         .justify_center()
                         .child(
                             div()
-                                .font_family("Menlo")
                                 .text_size(px(9.))
                                 .text_color(rgb(TEXT))
                                 .child("IMG"),
@@ -478,7 +485,6 @@ impl StashApp {
                 } else {
                     div()
                         .w(px(34.))
-                        .font_family("Menlo")
                         .text_size(px(12.))
                         .text_color(rgb(Self::type_color(ty)))
                         .child(ty.glyph().to_string())
@@ -487,7 +493,6 @@ impl StashApp {
             .child(
                 div()
                     .w(px(58.))
-                    .font_family("Menlo")
                     .text_size(px(12.))
                     .text_color(rgb(CYAN))
                     .child(age),
@@ -496,7 +501,6 @@ impl StashApp {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .font_family("Menlo")
                     .text_size(px(13.))
                     .text_color(if selected { rgb(PINK) } else { rgb(TEXT) })
                     .child(format!("{pin}{}", entry.preview_line(42))),
@@ -504,7 +508,6 @@ impl StashApp {
             .child(
                 div()
                     .w(px(36.))
-                    .font_family("Menlo")
                     .text_size(px(11.))
                     .text_color(rgb(DIM))
                     .child(shortcut),
@@ -534,7 +537,6 @@ impl StashApp {
                     .border_color(rgb(BORDER))
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(11.))
                             .text_color(rgb(MUTED))
                             .child("preview"),
@@ -543,9 +545,10 @@ impl StashApp {
                         div()
                             .flex()
                             .gap_3()
-                            .font_family("Menlo")
                             .text_size(px(11.))
                             .text_color(rgb(DIM))
+                            .child("drag to select")
+                            .child("⌘c copy")
                             .child("⌘p pin")
                             .child("⌘d del"),
                     ),
@@ -569,12 +572,45 @@ impl StashApp {
                                 .flex_1()
                                 .items_center()
                                 .justify_center()
-                                .font_family("Menlo")
                                 .text_color(rgb(DIM))
                                 .child("no selection"),
                         )
                     }),
             )
+    }
+
+    fn sync_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(entry) = self.selected_entry().cloned() else {
+            if self.preview_entry_id.take().is_some() {
+                self.preview.update(cx, |preview, cx| {
+                    preview.set_content("", cx);
+                });
+            }
+            return;
+        };
+        if self.preview_entry_id.as_deref() == Some(entry.id.as_str()) {
+            return;
+        }
+        self.preview_entry_id = Some(entry.id.clone());
+        let text = if entry.is_image() {
+            format!(
+                "{}\n{}×{}",
+                entry
+                    .image
+                    .as_ref()
+                    .map(|i| i.label.as_str())
+                    .unwrap_or("image"),
+                entry.image.as_ref().map(|i| i.width).unwrap_or(0),
+                entry.image.as_ref().map(|i| i.height).unwrap_or(0),
+            )
+        } else if entry.primary_type() == ContentType::Json {
+            crate::transform::pretty_json(&entry.content).unwrap_or_else(|_| entry.content.clone())
+        } else {
+            entry.content.clone()
+        };
+        self.preview.update(cx, |preview, cx| {
+            preview.set_content(text, cx);
+        });
     }
 
     fn render_preview_body(&self, entry: &ClipboardEntry) -> impl IntoElement {
@@ -602,17 +638,14 @@ impl StashApp {
                         .gap_2()
                         .child(
                             div()
-                                .font_family("Menlo")
                                 .text_size(px(14.))
                                 .text_color(rgb(TEXT))
                                 .child(image.label.clone()),
                         )
                         .child(
                             div()
-                                .font_family("Menlo")
                                 .text_size(px(11.))
-                                .text_color(rgb(TEXT))
-                                .opacity(0.7)
+                                .text_color(rgb(MUTED))
                                 .child(format!("{}×{}", image.width, image.height)),
                         )
                         .child(
@@ -621,9 +654,7 @@ impl StashApp {
                                 .px_3()
                                 .py_2()
                                 .rounded_sm()
-                                .bg(rgb(0x000000))
-                                .opacity(0.45)
-                                .font_family("Menlo")
+                                .bg(rgb(0x1a1520))
                                 .text_size(px(10.))
                                 .text_color(rgb(TEXT))
                                 .child(
@@ -632,12 +663,6 @@ impl StashApp {
                         ),
                 )
         } else {
-            let pretty = if entry.primary_type() == ContentType::Json {
-                crate::transform::pretty_json(&entry.content)
-                    .unwrap_or_else(|_| entry.content.clone())
-            } else {
-                entry.content.clone()
-            };
             div()
                 .id("preview-text")
                 .flex_1()
@@ -649,10 +674,9 @@ impl StashApp {
                 .border_color(rgb(BORDER))
                 .bg(rgb(SURFACE))
                 .overflow_y_scroll()
-                .font_family("Menlo")
                 .text_size(px(12.))
                 .text_color(rgb(TEXT))
-                .child(pretty)
+                .child(self.preview.clone())
         }
     }
 
@@ -707,7 +731,6 @@ impl StashApp {
                 div()
                     .flex()
                     .gap_3()
-                    .font_family("Menlo")
                     .text_size(px(11.))
                     .child(
                         div()
@@ -743,7 +766,6 @@ impl StashApp {
                     .child(
                         div()
                             .mb_2()
-                            .font_family("Menlo")
                             .text_size(px(12.))
                             .text_color(rgb(PINK))
                             .child("actions"),
@@ -755,7 +777,6 @@ impl StashApp {
                             .py_2()
                             .rounded_sm()
                             .bg(if selected { rgb(SELECT) } else { rgb(PANEL) })
-                            .font_family("Menlo")
                             .text_size(px(13.))
                             .text_color(if selected { rgb(PINK) } else { rgb(TEXT) })
                             .child(format!(
@@ -789,7 +810,6 @@ impl StashApp {
                     .gap_2()
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(12.))
                             .text_color(rgb(PINK))
                             .child("edit before paste"),
@@ -802,14 +822,12 @@ impl StashApp {
                             .border_1()
                             .border_color(rgb(BORDER))
                             .bg(rgb(SURFACE))
-                            .font_family("Menlo")
                             .text_size(px(13.))
                             .text_color(rgb(TEXT))
                             .child(format!("{}▌", self.edit_buffer)),
                     )
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(11.))
                             .text_color(rgb(MUTED))
                             .child("<enter> paste edited   <esc> cancel   <ctrl-u> clear"),
@@ -844,7 +862,6 @@ impl StashApp {
                     .h(px(40.))
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(12.))
                             .text_color(rgb(PINK))
                             .child(mode_badge),
@@ -852,7 +869,6 @@ impl StashApp {
                     .child(
                         div()
                             .flex_1()
-                            .font_family("Menlo")
                             .text_size(px(14.))
                             .text_color(if self.query.is_empty() {
                                 rgb(DIM)
@@ -867,7 +883,6 @@ impl StashApp {
                     )
                     .child(
                         div()
-                            .font_family("Menlo")
                             .text_size(px(11.))
                             .text_color(rgb(DIM))
                             .child(format!("{} matches", self.ranked_indices().len())),
@@ -878,7 +893,6 @@ impl StashApp {
                     div()
                         .px_4()
                         .pb_2()
-                        .font_family("Menlo")
                         .text_size(px(11.))
                         .text_color(rgb(MUTED))
                         .child(self.status.clone()),
@@ -896,6 +910,7 @@ impl Focusable for StashApp {
 impl Render for StashApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.clamp_selection();
+        self.sync_preview(cx);
         let now = Utc::now();
         let indices = self.ranked_indices();
         let selected = self.selected;
@@ -930,6 +945,9 @@ impl Render for StashApp {
             .size_full()
             .bg(rgb(BG))
             .text_color(rgb(TEXT))
+            .font_family(fonts::UI_MONO)
+            .text_size(px(13.))
+            .line_height(px(18.))
             .border_1()
             .border_color(rgb(BORDER))
             .rounded_xl()
@@ -960,7 +978,6 @@ impl Render for StashApp {
                                         .flex_1()
                                         .items_center()
                                         .justify_center()
-                                        .font_family("Menlo")
                                         .text_color(rgb(DIM))
                                         .child("no matches"),
                                 )
@@ -984,6 +1001,8 @@ impl Render for StashApp {
 
 pub fn run() {
     gpui_platform::application().run(|cx: &mut App| {
+        fonts::load(cx);
+        crate::selectable_preview::bind_keys(cx);
         cx.bind_keys([
             KeyBinding::new("up", MoveUp, Some("StashApp")),
             KeyBinding::new("ctrl-k", MoveUp, Some("StashApp")),
@@ -1022,6 +1041,8 @@ pub fn run() {
                     kind: WindowKind::Floating,
                     is_resizable: true,
                     is_minimizable: false,
+                    // Opaque enables cleaner glyph rasterization on macOS GPUI.
+                    window_background: WindowBackgroundAppearance::Opaque,
                     ..Default::default()
                 },
                 |_, cx| cx.new(StashApp::new),
