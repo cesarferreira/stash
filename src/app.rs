@@ -11,11 +11,22 @@ use crate::store::Store;
 use crate::transform::{TransformKind, openable_url, transform_entry};
 use chrono::Utc;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, KeyDownEvent,
-    ObjectFit, SharedString, Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations,
-    WindowKind, WindowOptions, actions, div, img, prelude::*, px, rgb, rgba, size,
+    AnyWindowHandle, App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable,
+    KeyBinding, KeyDownEvent, ObjectFit, SharedString, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowDecorations, WindowKind, WindowOptions, actions, div, img, prelude::*, px,
+    rgb, rgba, size,
 };
+use std::sync::OnceLock;
 use std::time::Duration;
+
+static TOGGLE_LABEL: OnceLock<String> = OnceLock::new();
+
+fn toggle_label() -> &'static str {
+    TOGGLE_LABEL
+        .get()
+        .map(String::as_str)
+        .unwrap_or("⌘⇧V")
+}
 
 actions!(
     stash,
@@ -281,13 +292,13 @@ impl StashApp {
         match self.mode {
             UiMode::Search => {
                 if let Some(content) = self.paste_payload() {
-                    self.copy_and_close(&content, window, cx);
+                    self.copy_and_hide(&content, cx);
                 }
             }
             UiMode::Actions => self.run_selected_action(window, cx),
             UiMode::Edit => {
                 let content = self.edit_buffer.clone();
-                self.copy_and_close(&content, window, cx);
+                self.copy_and_hide(&content, cx);
             }
         }
     }
@@ -296,14 +307,14 @@ impl StashApp {
         self.selected_entry().map(|entry| entry.content.clone())
     }
 
-    fn paste_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn paste_index(&mut self, index: usize, _: &mut Window, cx: &mut Context<Self>) {
         if self.mode != UiMode::Search {
             return;
         }
         let indices = self.ranked_indices();
         if let Some(&entry_idx) = indices.get(index) {
             let content = self.entries[entry_idx].content.clone();
-            self.copy_and_close(&content, window, cx);
+            self.copy_and_hide(&content, cx);
         }
     }
 
@@ -316,11 +327,13 @@ impl StashApp {
         cx.notify();
     }
 
-    fn close(&mut self, _: &Close, window: &mut Window, cx: &mut Context<Self>) {
+    fn close(&mut self, _: &Close, _: &mut Window, cx: &mut Context<Self>) {
         match self.mode {
             UiMode::Search => {
-                window.remove_window();
-                cx.quit();
+                self.mode = UiMode::Search;
+                self.query.clear();
+                self.selected = 0;
+                cx.hide();
             }
             UiMode::Actions | UiMode::Edit => {
                 self.mode = UiMode::Search;
@@ -400,19 +413,19 @@ impl StashApp {
         };
         match action {
             PrototypeAction::Paste | PrototypeAction::Copy => {
-                self.copy_and_close(&entry.content, window, cx);
+                self.copy_and_hide(&entry.content, cx);
             }
             PrototypeAction::PrettyJson => {
-                self.apply_transform(&entry, TransformKind::PrettyJson, window, cx);
+                self.apply_transform(&entry, TransformKind::PrettyJson, cx);
             }
             PrototypeAction::MinifyJson => {
-                self.apply_transform(&entry, TransformKind::MinifyJson, window, cx);
+                self.apply_transform(&entry, TransformKind::MinifyJson, cx);
             }
             PrototypeAction::RemoveTracking => {
-                self.apply_transform(&entry, TransformKind::RemoveTracking, window, cx);
+                self.apply_transform(&entry, TransformKind::RemoveTracking, cx);
             }
             PrototypeAction::DecodeJwt => {
-                self.apply_transform(&entry, TransformKind::DecodeJwt, window, cx);
+                self.apply_transform(&entry, TransformKind::DecodeJwt, cx);
             }
             PrototypeAction::OpenUrl => {
                 if let Some(url) = openable_url(&entry) {
@@ -439,11 +452,10 @@ impl StashApp {
         &mut self,
         entry: &ClipboardEntry,
         kind: TransformKind,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match transform_entry(entry, kind) {
-            Ok(content) => self.copy_and_close(&content, window, cx),
+            Ok(content) => self.copy_and_hide(&content, cx),
             Err(err) => {
                 self.status = err.message().to_string().into();
                 cx.notify();
@@ -451,10 +463,22 @@ impl StashApp {
         }
     }
 
-    fn copy_and_close(&mut self, content: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn copy_and_hide(&mut self, content: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(content.to_string()));
-        window.remove_window();
-        cx.quit();
+        self.mode = UiMode::Search;
+        self.query.clear();
+        self.selected = 0;
+        self.status = format!("copied · {label} to reopen", label = toggle_label()).into();
+        cx.hide();
+    }
+
+    /// Called when the popup is shown via hotkey.
+    pub fn prepare_for_show(&mut self, cx: &mut Context<Self>) {
+        self.reload_entries();
+        self.mode = UiMode::Search;
+        self.query.clear();
+        self.selected = 0;
+        cx.notify();
     }
 
     fn type_color(ty: ContentType) -> u32 {
@@ -514,7 +538,10 @@ impl StashApp {
                 div()
                     .text_size(px(11.))
                     .text_color(rgb(MUTED))
-                    .child("<esc> exit   <tab> actions   <enter> paste"),
+                    .child(format!(
+                        "<esc> hide   <tab> actions   <enter> copy   {} toggle",
+                        toggle_label()
+                    )),
             )
     }
 
@@ -1083,6 +1110,15 @@ impl Render for StashApp {
 
 pub fn run() {
     gpui_platform::application().run(|cx: &mut App| {
+        let config = match crate::config::load_or_create() {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                eprintln!("stash: config error ({err}) — using defaults");
+                crate::config::Config::default()
+            }
+        };
+        let _ = TOGGLE_LABEL.set(config.hotkey.toggle.clone());
+
         fonts::load(cx);
         crate::selectable_preview::bind_keys(cx);
         cx.bind_keys([
@@ -1113,6 +1149,21 @@ pub fn run() {
 
         cx.on_action(|_: &Quit, cx| cx.quit());
 
+        let hotkeys = match crate::hotkey::HotkeyService::start(&config.hotkey.toggle) {
+            Ok(service) => {
+                eprintln!(
+                    "stash: global hotkey `{}` registered (config: {})",
+                    service.label,
+                    crate::config::config_path().display()
+                );
+                Some(service)
+            }
+            Err(err) => {
+                eprintln!("stash: {err} — use Dock to reopen, or fix ~/.config/stash/stash.toml");
+                None
+            }
+        };
+
         let bounds = Bounds::centered(None, size(px(980.), px(560.)), cx);
         let window = cx
             .open_window(
@@ -1137,5 +1188,37 @@ pub fn run() {
                 cx.activate(true);
             })
             .unwrap();
+
+        if let Some(hotkeys) = hotkeys {
+            cx.spawn(async move |cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(40))
+                        .await;
+                    if !hotkeys.take_toggle_pressed() {
+                        continue;
+                    }
+                    cx.update(|cx| toggle_popup(window, cx));
+                }
+            })
+            .detach();
+        }
     });
+}
+
+fn toggle_popup(window: gpui::WindowHandle<StashApp>, cx: &mut App) {
+    let hidden = crate::hotkey::app_is_hidden();
+    let handle: AnyWindowHandle = window.into();
+    let ours_active = cx.active_window() == Some(handle);
+
+    if hidden || !ours_active {
+        cx.activate(true);
+        let _ = window.update(cx, |app, window, cx| {
+            app.prepare_for_show(cx);
+            window.activate_window();
+            window.focus(&app.focus_handle, cx);
+        });
+    } else {
+        cx.hide();
+    }
 }

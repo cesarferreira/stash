@@ -1,7 +1,9 @@
 mod app;
 mod clipboard;
+mod config;
 mod detect;
 mod fonts;
+mod hotkey;
 mod model;
 mod paths;
 mod search;
