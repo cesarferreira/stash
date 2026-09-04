@@ -1,19 +1,21 @@
 //! Maccy-simple list + Atuin colors, with a right-hand preview pane.
 
+use crate::clipboard::{pasteboard_change_count, read_capture};
 use crate::fonts;
 use crate::model::{
     ClipboardEntry, ContentType, PrototypeAction, UiMode, actions_for,
 };
-use crate::sample_data::sample_entries;
 use crate::search::{SearchContext, search_entries};
 use crate::selectable_preview::SelectablePreview;
+use crate::store::Store;
 use crate::transform::{TransformKind, openable_url, transform_entry};
 use chrono::Utc;
 use gpui::{
     App, Bounds, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, KeyDownEvent,
-    SharedString, Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind,
-    WindowOptions, actions, div, prelude::*, px, rgb, rgba, size,
+    ObjectFit, SharedString, Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations,
+    WindowKind, WindowOptions, actions, div, img, prelude::*, px, rgb, rgba, size,
 };
+use std::time::Duration;
 
 actions!(
     stash,
@@ -56,6 +58,7 @@ const GREEN: u32 = 0x9ece6a;
 const SELECT: u32 = 0x2a2035;
 
 pub struct StashApp {
+    store: Store,
     entries: Vec<ClipboardEntry>,
     query: String,
     edit_buffer: String,
@@ -67,23 +70,101 @@ pub struct StashApp {
     action_selected: usize,
     preview: Entity<SelectablePreview>,
     preview_entry_id: Option<String>,
+    last_change_count: Option<isize>,
+    _watch_task: gpui::Task<()>,
 }
 
 impl StashApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let preview = cx.new(SelectablePreview::new);
+        let store = match Store::open() {
+            Ok(store) => store,
+            Err(err) => {
+                eprintln!("stash: failed to open history db: {err}");
+                // Fall through with an empty in-memory store by retrying once via panic-less path —
+                // open always creates dirs; if it fails, keep a throwaway temp db.
+                let fallback = std::env::temp_dir().join("stash-fallback.sqlite");
+                let _ = std::fs::remove_file(&fallback);
+                Store::open_at(&fallback).expect("fallback sqlite")
+            }
+        };
+        let entries = store.list_entries().unwrap_or_default();
+        let status = if entries.is_empty() {
+            SharedString::from("copy something — history is empty")
+        } else {
+            SharedString::from(format!("{} items", entries.len()))
+        };
+
+        let watch_task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(350))
+                    .await;
+                if this
+                    .update(cx, |app, cx| {
+                        app.poll_clipboard(cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
         Self {
-            entries: sample_entries(),
+            store,
+            entries,
             query: String::new(),
             edit_buffer: String::new(),
             selected: 0,
             mode: UiMode::Search,
             focus_handle: cx.focus_handle(),
             search_ctx: SearchContext::default(),
-            status: SharedString::from(""),
+            status,
             action_selected: 0,
             preview,
             preview_entry_id: None,
+            last_change_count: None,
+            _watch_task: watch_task,
+        }
+    }
+
+    fn reload_entries(&mut self) {
+        match self.store.list_entries() {
+            Ok(entries) => {
+                self.entries = entries;
+                self.clamp_selection();
+                self.status = if self.entries.is_empty() {
+                    "copy something — history is empty".into()
+                } else {
+                    format!("{} items", self.entries.len()).into()
+                };
+            }
+            Err(err) => {
+                self.status = format!("db error: {err}").into();
+            }
+        }
+    }
+
+    fn poll_clipboard(&mut self, cx: &mut Context<Self>) {
+        let change = pasteboard_change_count();
+        if self.last_change_count == Some(change) {
+            return;
+        }
+        self.last_change_count = Some(change);
+        let Some(capture) = read_capture() else {
+            return;
+        };
+        match self.store.record(capture) {
+            Ok(true) => {
+                self.reload_entries();
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(err) => {
+                self.status = format!("capture error: {err}").into();
+                cx.notify();
+            }
         }
     }
 
@@ -97,12 +178,6 @@ impl StashApp {
     fn selected_entry(&self) -> Option<&ClipboardEntry> {
         let indices = self.ranked_indices();
         indices.get(self.selected).map(|&i| &self.entries[i])
-    }
-
-    fn selected_entry_mut(&mut self) -> Option<&mut ClipboardEntry> {
-        let indices = self.ranked_indices();
-        let idx = *indices.get(self.selected)?;
-        self.entries.get_mut(idx)
     }
 
     fn clamp_selection(&mut self) {
@@ -269,22 +344,36 @@ impl StashApp {
     }
 
     fn toggle_pin(&mut self, _: &TogglePin, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(entry) = self.selected_entry_mut() {
-            entry.pinned = !entry.pinned;
+        let Some(entry) = self.selected_entry() else {
+            return;
+        };
+        let id = entry.id.clone();
+        let pinned = !entry.pinned;
+        if let Err(err) = self.store.set_pinned(&id, pinned) {
+            self.status = format!("pin error: {err}").into();
             cx.notify();
+            return;
         }
+        self.reload_entries();
+        cx.notify();
     }
 
     fn delete_entry(&mut self, _: &DeleteEntry, _: &mut Window, cx: &mut Context<Self>) {
         let indices = self.ranked_indices();
-        if let Some(&idx) = indices.get(self.selected) {
-            self.entries.remove(idx);
-            self.clamp_selection();
-            if self.mode == UiMode::Actions {
-                self.mode = UiMode::Search;
-            }
+        let Some(&idx) = indices.get(self.selected) else {
+            return;
+        };
+        let id = self.entries[idx].id.clone();
+        if let Err(err) = self.store.delete(&id) {
+            self.status = format!("delete error: {err}").into();
             cx.notify();
+            return;
         }
+        self.reload_entries();
+        if self.mode == UiMode::Actions {
+            self.mode = UiMode::Search;
+        }
+        cx.notify();
     }
 
     fn copy_selected(&mut self, _: &CopySelected, _: &mut Window, cx: &mut Context<Self>) {
@@ -630,37 +719,30 @@ impl StashApp {
                     div()
                         .flex_1()
                         .w_full()
+                        .min_h(px(140.))
                         .bg(rgb(image.accent))
                         .flex()
-                        .flex_col()
                         .items_center()
                         .justify_center()
-                        .gap_2()
                         .child(
-                            div()
-                                .text_size(px(14.))
-                                .text_color(rgb(TEXT))
-                                .child(image.label.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .text_color(rgb(MUTED))
-                                .child(format!("{}×{}", image.width, image.height)),
-                        )
-                        .child(
-                            div()
-                                .mt_2()
-                                .px_3()
-                                .py_2()
-                                .rounded_sm()
-                                .bg(rgb(0x1a1520))
-                                .text_size(px(10.))
-                                .text_color(rgb(TEXT))
-                                .child(
-                                    "  14s   8h ago   git init\n  32ms  2h ago   cargo run\n> 50s  50s ago   stash",
-                                ),
+                            img(image.path.clone())
+                                .object_fit(ObjectFit::Contain)
+                                .w_full()
+                                .h(px(200.)),
                         ),
+                )
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .border_t_1()
+                        .border_color(rgb(BORDER))
+                        .text_size(px(11.))
+                        .text_color(rgb(MUTED))
+                        .child(format!(
+                            "{} · {}×{}",
+                            image.label, image.width, image.height
+                        )),
                 )
         } else {
             div()

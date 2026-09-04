@@ -1,6 +1,6 @@
 # stash
 
-Atuin for your clipboard — interactive GPUI prototype.
+Atuin for your clipboard — searchable history with a keyboard-first popup.
 
 ## Run
 
@@ -8,7 +8,13 @@ Atuin for your clipboard — interactive GPUI prototype.
 cargo run
 ```
 
-## Prototype shortcuts
+History is stored on disk at:
+
+`~/Library/Application Support/dev.stash.stash/clipboard.sqlite`
+
+(plus image blobs under `blobs/`). It persists across quits and reboots. Clipboard capture runs while the app is open.
+
+## Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -22,4 +28,4 @@ cargo run
 | ⌘D | Delete |
 | ⌘C | Copy without closing |
 
-This draft uses in-memory PRD sample data only — no clipboard watcher, daemon, or synthetic paste.
+Not yet: background daemon, global ⌘⇧V, or synthetic paste into the previous app.

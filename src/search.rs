@@ -166,11 +166,70 @@ fn recent_score(entry: &ClipboardEntry, now: DateTime<Utc>) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sample_data::sample_entries;
+    use crate::model::{ClipboardEntry, ContentType, SourceContext};
+    use chrono::Duration;
+
+    fn fixture_entries() -> Vec<ClipboardEntry> {
+        let now = Utc::now();
+        vec![
+            entry(
+                "1",
+                "grpcurl robot.api.v1.RobotService/GetStatus",
+                &[ContentType::ShellCommand, ContentType::PlainText],
+                Some("stax"),
+                now - Duration::minutes(2),
+                false,
+            ),
+            entry(
+                "2",
+                r#"{"token":"abc","repo":"stax"}"#,
+                &[ContentType::Json],
+                Some("stax"),
+                now - Duration::minutes(5),
+                true,
+            ),
+            entry(
+                "3",
+                r#"{"token":"xyz","repo":"other"}"#,
+                &[ContentType::Json],
+                Some("other"),
+                now - Duration::hours(2),
+                false,
+            ),
+        ]
+    }
+
+    fn entry(
+        id: &str,
+        content: &str,
+        types: &[ContentType],
+        repo: Option<&str>,
+        at: chrono::DateTime<Utc>,
+        pinned: bool,
+    ) -> ClipboardEntry {
+        ClipboardEntry {
+            id: id.into(),
+            created_at: at,
+            last_copied_at: at,
+            content: content.into(),
+            detected_types: types.to_vec(),
+            source: SourceContext {
+                app_name: "Test".into(),
+                bundle_id: None,
+                cwd: None,
+                git_repo: repo.map(str::to_string),
+                git_branch: None,
+                hostname: None,
+            },
+            copy_count: 1,
+            pinned,
+            image: None,
+        }
+    }
 
     #[test]
     fn empty_query_returns_recent_first() {
-        let entries = sample_entries();
+        let entries = fixture_entries();
         let hits = search_entries(&entries, "", Utc::now(), &SearchContext::default());
         assert!(!hits.is_empty());
         let first = &entries[hits[0].index];
@@ -179,7 +238,7 @@ mod tests {
 
     #[test]
     fn grpc_query_finds_robot_command() {
-        let entries = sample_entries();
+        let entries = fixture_entries();
         let hits = search_entries(
             &entries,
             "grpc robot",
@@ -201,10 +260,9 @@ mod tests {
 
     #[test]
     fn same_repo_boosts_json_token_results() {
-        let entries = sample_entries();
+        let entries = fixture_entries();
         let hits = search_entries(&entries, "token", Utc::now(), &SearchContext::default());
         assert!(!hits.is_empty());
-        // Prefer stax-context entry when available among matches.
         let top_repos: Vec<_> = hits
             .iter()
             .take(3)

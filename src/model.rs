@@ -1,7 +1,8 @@
-//! Clipboard entry models for the interactive prototype.
+//! Clipboard entry models.
 
 use chrono::{DateTime, Utc};
 use std::fmt;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContentType {
@@ -49,6 +50,23 @@ impl ContentType {
             Self::Image => "img",
         }
     }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        Some(match label {
+            "text" => Self::PlainText,
+            "url" => Self::Url,
+            "json" => Self::Json,
+            "jwt" => Self::Jwt,
+            "uuid" => Self::Uuid,
+            "sha" => Self::GitSha,
+            "path" => Self::FilePath,
+            "shell" => Self::ShellCommand,
+            "trace" => Self::StackTrace,
+            "github" => Self::GitHubUrl,
+            "image" => Self::Image,
+            _ => return None,
+        })
+    }
 }
 
 impl fmt::Display for ContentType {
@@ -75,6 +93,7 @@ pub struct ImageMeta {
     pub height: u32,
     pub label: String,
     pub accent: u32,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
