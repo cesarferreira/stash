@@ -58,13 +58,13 @@ make build-release && ./target/release/stash
 stash
 ```
 
-Keep the process running. It captures clipboard changes while open (including when the popup is hidden).
+stash runs as a **background agent** (no Dock icon). After `make install` / `make install-release`, the first launch installs a LaunchAgent so it starts again at login.
 
 | Action | How |
 |--------|-----|
 | Show / hide popup | Global hotkey (default `cmd+shift+v`) |
 | Hide | `esc` |
-| Quit | `cmd+q` or Dock → Quit |
+| Quit | `cmd+q` (LaunchAgent restarts only after a crash, not a clean quit) |
 
 In the popup: ↑↓ to move, `enter` to paste into the previous app, `tab` for actions, `cmd+e` edit, `cmd+p` pin, `cmd+d` delete.
 
@@ -80,9 +80,12 @@ On first launch, stash writes `~/.config/stash/stash.toml`:
 ```toml
 [hotkey]
 toggle = "cmd+shift+v"
+
+[agent]
+launch_at_login = true
 ```
 
-Change `toggle` to a lowercase chord (`cmd+shift+v`, `ctrl+alt+s`, …), then restart.
+Change `toggle` to a lowercase chord (`cmd+shift+v`, `ctrl+alt+s`, …), then restart. Set `launch_at_login = false` to remove the LaunchAgent.
 
 History lives at:
 

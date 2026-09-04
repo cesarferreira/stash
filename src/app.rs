@@ -1116,6 +1116,9 @@ impl Render for StashApp {
 
 pub fn run() {
     gpui_platform::application().run(|cx: &mut App| {
+        // Accessory = no Dock / Cmd-Tab icon (clipboard agent, not a normal app).
+        crate::agent::become_accessory();
+
         let config = match crate::config::load_or_create() {
             Ok(cfg) => cfg,
             Err(err) => {
@@ -1124,6 +1127,15 @@ pub fn run() {
             }
         };
         let _ = TOGGLE_LABEL.set(config.hotkey.toggle.clone());
+
+        if let Err(err) = crate::agent::sync_launch_agent(config.agent.launch_at_login) {
+            eprintln!("stash: LaunchAgent sync failed: {err}");
+        }
+
+        let agent_mode = crate::agent::is_agent_launch();
+        if agent_mode {
+            eprintln!("stash: agent mode (background capture; hotkey shows popup)");
+        }
 
         fonts::load(cx);
         crate::selectable_preview::bind_keys(cx);
@@ -1167,7 +1179,9 @@ pub fn run() {
                 Some(service)
             }
             Err(err) => {
-                eprintln!("stash: {err} — use Dock to reopen, or fix ~/.config/stash/stash.toml");
+                eprintln!(
+                    "stash: {err} — use the configured hotkey to reopen, or fix ~/.config/stash/stash.toml"
+                );
                 None
             }
         };
@@ -1190,12 +1204,17 @@ pub fn run() {
             )
             .unwrap();
 
-        window
-            .update(cx, |app, window, cx| {
-                window.focus(&app.focus_handle, cx);
-                cx.activate(true);
-            })
-            .unwrap();
+        if agent_mode {
+            // Login / LaunchAgent: stay hidden until the hotkey.
+            cx.hide();
+        } else {
+            window
+                .update(cx, |app, window, cx| {
+                    window.focus(&app.focus_handle, cx);
+                    cx.activate(true);
+                })
+                .unwrap();
+        }
 
         if let Some(hotkeys) = hotkeys {
             cx.spawn(async move |cx| {

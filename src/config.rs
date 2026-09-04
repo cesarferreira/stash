@@ -16,12 +16,18 @@ const DEFAULT_TOML: &str = r#"# stash configuration
 [hotkey]
 # Global shortcut to show / hide the popup
 toggle = "cmd+shift+v"
+
+[agent]
+# Install a LaunchAgent so stash starts at login (no Dock icon)
+launch_at_login = true
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub hotkey: HotkeyConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,8 +37,19 @@ pub struct HotkeyConfig {
     pub toggle: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Install `~/Library/LaunchAgents/dev.stash.agent.plist` on start.
+    #[serde(default = "default_launch_at_login")]
+    pub launch_at_login: bool,
+}
+
 fn default_toggle() -> String {
     DEFAULT_TOGGLE.into()
+}
+
+fn default_launch_at_login() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -40,6 +57,9 @@ impl Default for Config {
         Self {
             hotkey: HotkeyConfig {
                 toggle: default_toggle(),
+            },
+            agent: AgentConfig {
+                launch_at_login: default_launch_at_login(),
             },
         }
     }
@@ -49,6 +69,14 @@ impl Default for HotkeyConfig {
     fn default() -> Self {
         Self {
             toggle: default_toggle(),
+        }
+    }
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            launch_at_login: default_launch_at_login(),
         }
     }
 }
@@ -118,6 +146,15 @@ mod tests {
     fn empty_file_uses_defaults() {
         let cfg: Config = toml::from_str("").unwrap();
         assert_eq!(cfg.hotkey.toggle, DEFAULT_TOGGLE);
+        assert!(cfg.agent.launch_at_login);
+    }
+
+    #[test]
+    fn parses_agent_section() {
+        let cfg: Config = toml::from_str(DEFAULT_TOML).unwrap();
+        assert!(cfg.agent.launch_at_login);
+        let cfg: Config = toml::from_str("[agent]\nlaunch_at_login = false\n").unwrap();
+        assert!(!cfg.agent.launch_at_login);
     }
 
     #[test]

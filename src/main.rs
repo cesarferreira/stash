@@ -1,3 +1,4 @@
+mod agent;
 mod app;
 mod clipboard;
 mod config;
