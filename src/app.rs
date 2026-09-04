@@ -825,6 +825,9 @@ impl StashApp {
             .collect::<Vec<_>>()
             .join(" · ");
         let mut meta_rows = vec![("Application", entry.source.app_name.clone()), ("Type", ty)];
+        if !entry.tags.is_empty() {
+            meta_rows.push(("Tags", crate::tags::format_tags(&entry.tags)));
+        }
         if let Some(image) = &entry.image {
             meta_rows.push(("Dimensions", format!("{}×{}", image.width, image.height)));
         }
@@ -988,7 +991,7 @@ impl StashApp {
                                 rgb(TEXT)
                             })
                             .child(if self.query.is_empty() && self.mode == UiMode::Search {
-                                "type to search…▌".to_string()
+                                "type to search…  #img #json  ▌".to_string()
                             } else {
                                 display
                             }),

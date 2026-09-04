@@ -1,6 +1,7 @@
-//! In-memory fuzzy search and ranking.
+//! In-memory fuzzy search and ranking, with `#tag` filters.
 
 use crate::model::ClipboardEntry;
+use crate::tags::normalize_tag;
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -32,6 +33,34 @@ impl Default for SearchContext {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedQuery {
+    /// Required tags (AND), normalized without `#`.
+    tags: Vec<String>,
+    /// Remaining free-text tokens for fuzzy match.
+    text_tokens: Vec<String>,
+}
+
+fn parse_query(query: &str) -> ParsedQuery {
+    let mut tags = Vec::new();
+    let mut text_tokens = Vec::new();
+    for token in query.split_whitespace() {
+        if let Some(rest) = token.strip_prefix('#') {
+            let tag = normalize_tag(rest);
+            if !tag.is_empty() && !tags.iter().any(|t| t == &tag) {
+                tags.push(tag);
+            }
+        } else if !token.is_empty() {
+            text_tokens.push(token.to_string());
+        }
+    }
+    ParsedQuery { tags, text_tokens }
+}
+
+fn entry_has_tag(entry: &ClipboardEntry, tag: &str) -> bool {
+    entry.tags.iter().any(|t| t == tag)
+}
+
 pub fn search_entries(
     entries: &[ClipboardEntry],
     query: &str,
@@ -39,7 +68,9 @@ pub fn search_entries(
     ctx: &SearchContext,
 ) -> Vec<RankedHit> {
     let query = query.trim();
-    if query.is_empty() {
+    let parsed = parse_query(query);
+
+    if parsed.tags.is_empty() && parsed.text_tokens.is_empty() {
         let mut hits: Vec<_> = entries
             .iter()
             .enumerate()
@@ -53,31 +84,37 @@ pub fn search_entries(
     }
 
     let matcher = SkimMatcherV2::default().ignore_case();
-    let tokens: Vec<&str> = query.split_whitespace().collect();
     let mut hits = Vec::new();
 
     for (index, entry) in entries.iter().enumerate() {
-        let haystack = searchable_text(entry);
+        if !parsed.tags.iter().all(|tag| entry_has_tag(entry, tag)) {
+            continue;
+        }
+
         let mut token_score = 0i64;
-        let mut matched = true;
-        for token in &tokens {
-            match matcher.fuzzy_match(&haystack, token) {
-                Some(score) => token_score += score,
-                None => {
-                    matched = false;
-                    break;
+        if !parsed.text_tokens.is_empty() {
+            let haystack = searchable_text(entry);
+            let mut matched = true;
+            for token in &parsed.text_tokens {
+                match matcher.fuzzy_match(&haystack, token) {
+                    Some(score) => token_score += score,
+                    None => {
+                        matched = false;
+                        break;
+                    }
                 }
             }
-        }
-        if !matched {
-            continue;
+            if !matched {
+                continue;
+            }
         }
 
         let score = token_score
             + context_boost(entry, ctx)
             + pin_boost(entry)
             + recent_score(entry, now) / 4
-            + (entry.copy_count as i64).min(20);
+            + (entry.copy_count as i64).min(20)
+            + (parsed.tags.len() as i64) * 5;
         hits.push(RankedHit { index, score });
     }
 
@@ -90,6 +127,10 @@ fn searchable_text(entry: &ClipboardEntry) -> String {
     for ty in &entry.detected_types {
         parts.push(ty.label().to_string());
         parts.push(ty.glyph().to_string());
+    }
+    for tag in &entry.tags {
+        parts.push(tag.clone());
+        parts.push(format!("#{tag}"));
     }
     if let Some(repo) = &entry.source.git_repo {
         parts.push(repo.clone());
@@ -167,6 +208,7 @@ fn recent_score(entry: &ClipboardEntry, now: DateTime<Utc>) -> i64 {
 mod tests {
     use super::*;
     use crate::model::{ClipboardEntry, ContentType, SourceContext};
+    use crate::tags::tags_for;
     use chrono::Duration;
 
     fn fixture_entries() -> Vec<ClipboardEntry> {
@@ -194,6 +236,14 @@ mod tests {
                 &[ContentType::Json],
                 Some("other"),
                 now - Duration::hours(2),
+                false,
+            ),
+            entry(
+                "4",
+                "",
+                &[ContentType::Image],
+                None,
+                now - Duration::seconds(30),
                 false,
             ),
         ]
@@ -224,6 +274,7 @@ mod tests {
             copy_count: 1,
             pinned,
             image: None,
+            tags: tags_for(types, pinned),
         }
     }
 
@@ -269,5 +320,41 @@ mod tests {
             .filter_map(|h| entries[h.index].source.git_repo.as_deref())
             .collect();
         assert!(top_repos.iter().any(|r| *r == "stax") || !top_repos.is_empty());
+    }
+
+    #[test]
+    fn hash_img_filters_images() {
+        let entries = fixture_entries();
+        let hits = search_entries(&entries, "#img", Utc::now(), &SearchContext::default());
+        assert_eq!(hits.len(), 1);
+        assert!(entries[hits[0].index]
+            .tags
+            .iter()
+            .any(|t| t == "img"));
+    }
+
+    #[test]
+    fn hash_json_and_text_combine() {
+        let entries = fixture_entries();
+        let hits = search_entries(
+            &entries,
+            "#json stax",
+            Utc::now(),
+            &SearchContext::default(),
+        );
+        assert!(!hits.is_empty());
+        for hit in &hits {
+            assert!(entries[hit.index].tags.iter().any(|t| t == "json"));
+        }
+    }
+
+    #[test]
+    fn parse_extracts_tags() {
+        let parsed = parse_query("#img #JSON hello world");
+        assert_eq!(parsed.tags, vec!["img".to_string(), "json".to_string()]);
+        assert_eq!(
+            parsed.text_tokens,
+            vec!["hello".to_string(), "world".to_string()]
+        );
     }
 }

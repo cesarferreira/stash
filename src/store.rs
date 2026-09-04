@@ -4,6 +4,7 @@ use crate::clipboard::{Capture, CaptureKind, accent_from_png};
 use crate::detect::detect_types;
 use crate::model::{ClipboardEntry, ContentType, ImageMeta, SourceContext};
 use crate::paths::{blob_path_for_hash, db_path, ensure_data_dirs};
+use crate::tags::tags_for;
 use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::fs;
@@ -45,13 +46,19 @@ impl Store {
                 image_label TEXT,
                 image_accent INTEGER,
                 copy_count INTEGER NOT NULL DEFAULT 1,
-                pinned INTEGER NOT NULL DEFAULT 0
+                pinned INTEGER NOT NULL DEFAULT 0,
+                tags TEXT NOT NULL DEFAULT '[]'
             );
             CREATE INDEX IF NOT EXISTS idx_entries_hash ON entries(content_hash);
             CREATE INDEX IF NOT EXISTS idx_entries_last ON entries(last_copied_at DESC);
             ",
         )
         .map_err(|e| e.to_string())?;
+        // Existing DBs created before tags existed.
+        let _ = conn.execute(
+            "ALTER TABLE entries ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+            [],
+        );
         Ok(Self { conn })
     }
 
@@ -62,7 +69,7 @@ impl Store {
                 "SELECT id, created_at, last_copied_at, content_type, detected_types,
                         text_content, blob_path, content_hash, source_app, source_bundle_id,
                         image_width, image_height, image_label, image_accent,
-                        copy_count, pinned
+                        copy_count, pinned, tags
                  FROM entries
                  ORDER BY pinned DESC, last_copied_at DESC",
             )
@@ -103,13 +110,14 @@ impl Store {
             CaptureKind::Text(text) => {
                 let types = detect_types(&text);
                 let primary = types.first().copied().unwrap_or(ContentType::PlainText);
+                let tags = tags_for(&types, false);
                 self.conn
                     .execute(
                         "INSERT INTO entries (
                             id, created_at, last_copied_at, content_type, detected_types,
                             text_content, blob_path, content_hash, source_app, source_bundle_id,
-                            copy_count, pinned
-                         ) VALUES (?1,?2,?2,?3,?4,?5,NULL,?6,?7,?8,1,0)",
+                            copy_count, pinned, tags
+                         ) VALUES (?1,?2,?2,?3,?4,?5,NULL,?6,?7,?8,1,0,?9)",
                         params![
                             id,
                             now,
@@ -119,6 +127,7 @@ impl Store {
                             capture.content_hash,
                             capture.source.app_name,
                             capture.source.bundle_id,
+                            tags_to_json(&tags),
                         ],
                     )
                     .map_err(|e| e.to_string())?;
@@ -128,14 +137,15 @@ impl Store {
                 let accent = accent_from_png(&png) as i64;
                 let label = format!("PNG {width}×{height}");
                 let types = vec![ContentType::Image];
+                let tags = tags_for(&types, false);
                 self.conn
                     .execute(
                         "INSERT INTO entries (
                             id, created_at, last_copied_at, content_type, detected_types,
                             text_content, blob_path, content_hash, source_app, source_bundle_id,
                             image_width, image_height, image_label, image_accent,
-                            copy_count, pinned
-                         ) VALUES (?1,?2,?2,?3,?4,NULL,?5,?6,?7,?8,?9,?10,?11,?12,1,0)",
+                            copy_count, pinned, tags
+                         ) VALUES (?1,?2,?2,?3,?4,NULL,?5,?6,?7,?8,?9,?10,?11,?12,1,0,?13)",
                         params![
                             id,
                             now,
@@ -149,6 +159,7 @@ impl Store {
                             height as i64,
                             label,
                             accent,
+                            tags_to_json(&tags),
                         ],
                     )
                     .map_err(|e| e.to_string())?;
@@ -158,10 +169,20 @@ impl Store {
     }
 
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<(), String> {
+        let types_json: String = self
+            .conn
+            .query_row(
+                "SELECT detected_types FROM entries WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let types = types_from_json(&types_json);
+        let tags = tags_for(&types, pinned);
         self.conn
             .execute(
-                "UPDATE entries SET pinned = ?1 WHERE id = ?2",
-                params![pinned as i64, id],
+                "UPDATE entries SET pinned = ?1, tags = ?2 WHERE id = ?3",
+                params![pinned as i64, tags_to_json(&tags), id],
             )
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -223,6 +244,14 @@ impl Store {
     }
 }
 
+fn tags_to_json(tags: &[String]) -> String {
+    serde_json::to_string(tags).unwrap_or_else(|_| "[]".into())
+}
+
+fn tags_from_json(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+}
+
 fn types_to_json(types: &[ContentType]) -> String {
     let labels: Vec<&str> = types.iter().map(|t| t.label()).collect();
     serde_json::to_string(&labels).unwrap_or_else(|_| "[\"text\"]".into())
@@ -259,6 +288,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
     let image_accent: Option<i64> = row.get(13)?;
     let copy_count: i64 = row.get(14)?;
     let pinned: i64 = row.get(15)?;
+    let tags_raw: String = row.get(16).unwrap_or_else(|_| "[]".into());
 
     let image = match (blob_path, image_width, image_height) {
         (Some(path), Some(w), Some(h)) => Some(ImageMeta {
@@ -271,12 +301,19 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
         _ => None,
     };
 
+    let detected_types = types_from_json(&detected_types);
+    let pinned = pinned != 0;
+    let mut tags = tags_from_json(&tags_raw);
+    if tags.is_empty() {
+        tags = tags_for(&detected_types, pinned);
+    }
+
     Ok(ClipboardEntry {
         id,
         created_at: secs_to_utc(created_at),
         last_copied_at: secs_to_utc(last_copied_at),
         content: text_content.unwrap_or_default(),
-        detected_types: types_from_json(&detected_types),
+        detected_types,
         source: SourceContext {
             app_name: source_app.unwrap_or_else(|| "Unknown".into()),
             bundle_id: source_bundle_id,
@@ -286,8 +323,9 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
             hostname: None,
         },
         copy_count: copy_count.max(1) as u32,
-        pinned: pinned != 0,
+        pinned,
         image,
+        tags,
     })
 }
 
@@ -307,40 +345,8 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("stash-test-{nanos}"));
-        fs::create_dir_all(dir.join("blobs")).unwrap();
-        // Point ProjectDirs-less path by opening a custom connection via env override —
-        // use a dedicated open_in for tests.
-        let path = dir.join("clipboard.sqlite");
-        let conn = Connection::open(&path).unwrap();
-        let store = Store { conn };
-        store
-            .conn
-            .execute_batch(
-                "
-                CREATE TABLE IF NOT EXISTS entries (
-                    id TEXT PRIMARY KEY,
-                    created_at INTEGER NOT NULL,
-                    last_copied_at INTEGER NOT NULL,
-                    content_type TEXT NOT NULL,
-                    detected_types TEXT NOT NULL,
-                    text_content TEXT,
-                    blob_path TEXT,
-                    content_hash TEXT NOT NULL,
-                    source_app TEXT,
-                    source_bundle_id TEXT,
-                    image_width INTEGER,
-                    image_height INTEGER,
-                    image_label TEXT,
-                    image_accent INTEGER,
-                    copy_count INTEGER NOT NULL DEFAULT 1,
-                    pinned INTEGER NOT NULL DEFAULT 0
-                );
-                ",
-            )
-            .unwrap();
-        // Patch write_blob to use temp dir via content that doesn't need blobs for text tests.
-        let _ = dir;
-        store
+        fs::create_dir_all(&dir).unwrap();
+        Store::open_at(&dir.join("clipboard.sqlite")).unwrap()
     }
 
     #[test]

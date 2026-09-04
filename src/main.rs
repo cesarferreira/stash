@@ -10,6 +10,7 @@ mod paths;
 mod search;
 mod selectable_preview;
 mod store;
+mod tags;
 mod transform;
 
 fn main() {

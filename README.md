@@ -68,6 +68,8 @@ Keep the process running. It captures clipboard changes while open (including wh
 
 In the popup: ↑↓ to move, `enter` to paste into the previous app, `tab` for actions, `cmd+e` edit, `cmd+p` pin, `cmd+d` delete.
 
+Search with `#tags` (AND): `#img`, `#txt`, `#json`, `#shell`, `#pin`, … — combine with text, e.g. `#json token`.
+
 Paste-back needs **Accessibility** permission for stash (System Settings → Privacy & Security → Accessibility) so it can send ⌘V.
 
 <a id="config"></a>

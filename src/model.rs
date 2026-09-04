@@ -108,6 +108,8 @@ pub struct ClipboardEntry {
     pub copy_count: u32,
     pub pinned: bool,
     pub image: Option<ImageMeta>,
+    /// Searchable tags without `#` (e.g. `img`, `json`). An entry may have many.
+    pub tags: Vec<String>,
 }
 
 impl ClipboardEntry {
