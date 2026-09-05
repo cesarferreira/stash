@@ -23,7 +23,7 @@ global-hotkey = "0.8"
 gpui = { git = "https://github.com/zed-industries/zed", rev = "3ce72bab201ad82418fc9716aad11332624951bc" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "3ce72bab201ad82418fc9716aad11332624951bc", features = ["font-kit"] }
 hex = "0.4"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSApplication",
@@ -45,6 +45,7 @@ toml = "0.8"
 unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+ureq = { version = "2", features = ["json"] }
 
 [profile.dev]
 debug = 0

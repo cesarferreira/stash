@@ -108,6 +108,8 @@ pub struct ClipboardEntry {
     pub copy_count: u32,
     pub pinned: bool,
     pub image: Option<ImageMeta>,
+    /// Website thumbnail for URL entries (not pasted as an image).
+    pub link_preview: Option<ImageMeta>,
     /// Searchable tags without `#` (e.g. `img`, `json`). An entry may have many.
     pub tags: Vec<String>,
 }
@@ -121,12 +123,14 @@ impl ClipboardEntry {
     }
 
     pub fn is_image(&self) -> bool {
-        self.image.is_some() || self.detected_types.contains(&ContentType::Image)
+        self.detected_types.contains(&ContentType::Image)
     }
 
     pub fn preview_line(&self, max_chars: usize) -> String {
-        if let Some(image) = &self.image {
-            return format!("[{} · {}×{}]", image.label, image.width, image.height);
+        if self.is_image() {
+            if let Some(image) = &self.image {
+                return format!("[{} · {}×{}]", image.label, image.width, image.height);
+            }
         }
         let flat: String = self
             .content

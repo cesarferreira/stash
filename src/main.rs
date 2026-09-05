@@ -5,6 +5,7 @@ mod config;
 mod detect;
 mod fonts;
 mod hotkey;
+mod link_preview;
 mod model;
 mod paste;
 mod paths;

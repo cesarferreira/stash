@@ -274,6 +274,7 @@ mod tests {
             copy_count: 1,
             pinned,
             image: None,
+            link_preview: None,
             tags: tags_for(types, pinned),
         }
     }

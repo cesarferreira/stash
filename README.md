@@ -24,7 +24,7 @@
 
 ---
 
-Keyboard-first clipboard history for macOS. Runs in the background, captures text and images, and pops up on a global hotkey so you can search and re-copy without breaking flow.
+Keyboard-first clipboard history for macOS. Runs in the background, captures text and images, and pops up on a global hotkey so you can search and re-copy without breaking flow. Copied URLs show a website preview (Open Graph image, or a screenshot fallback) in the right-hand pane.
 
 <a id="install"></a>
 ## Install

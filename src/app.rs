@@ -14,6 +14,7 @@ use gpui::{
     WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind, WindowOptions,
     actions, div, img, prelude::*, px, rgb, rgba, size,
 };
+use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -77,6 +78,8 @@ pub struct StashApp {
     preview: Entity<SelectablePreview>,
     preview_entry_id: Option<String>,
     last_change_count: Option<isize>,
+    link_preview_inflight: HashSet<String>,
+    link_preview_failed: HashSet<String>,
     _watch_task: gpui::Task<()>,
 }
 
@@ -117,7 +120,7 @@ impl StashApp {
             }
         });
 
-        Self {
+        let mut app = Self {
             store,
             entries,
             query: String::new(),
@@ -131,8 +134,12 @@ impl StashApp {
             preview,
             preview_entry_id: None,
             last_change_count: None,
+            link_preview_inflight: HashSet::new(),
+            link_preview_failed: HashSet::new(),
             _watch_task: watch_task,
-        }
+        };
+        app.queue_missing_link_previews(cx);
+        app
     }
 
     fn reload_entries(&mut self) {
@@ -164,6 +171,7 @@ impl StashApp {
         match self.store.record(capture) {
             Ok(true) => {
                 self.reload_entries();
+                self.queue_missing_link_previews(cx);
                 cx.notify();
             }
             Ok(false) => {}
@@ -172,6 +180,57 @@ impl StashApp {
                 cx.notify();
             }
         }
+    }
+
+    fn queue_missing_link_previews(&mut self, cx: &mut Context<Self>) {
+        let Ok(missing) = self.store.urls_missing_preview() else {
+            return;
+        };
+        for (id, url) in missing {
+            self.start_link_preview_fetch(id, url, cx);
+        }
+    }
+
+    fn start_link_preview_fetch(&mut self, id: String, url: String, cx: &mut Context<Self>) {
+        if self.link_preview_failed.contains(&id) || self.link_preview_inflight.contains(&id) {
+            return;
+        }
+        if self.link_preview_inflight.len() >= 2 {
+            return;
+        }
+        self.link_preview_inflight.insert(id.clone());
+        cx.spawn(async move |this, cx| {
+            let fetched = cx
+                .background_executor()
+                .spawn_dedicated(move |_local| async move {
+                    crate::link_preview::fetch_link_preview(&url)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.link_preview_inflight.remove(&id);
+                match fetched {
+                    Ok(preview) => {
+                        if let Err(err) = app.store.attach_link_preview(&id, &preview) {
+                            eprintln!("stash: save link preview: {err}");
+                            app.link_preview_failed.insert(id);
+                        } else {
+                            app.reload_entries();
+                            // Force preview pane to pick up the new thumbnail.
+                            app.preview_entry_id = None;
+                            app.sync_preview(cx);
+                            app.queue_missing_link_previews(cx);
+                            cx.notify();
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("stash: link preview for {id}: {err}");
+                        app.link_preview_failed.insert(id);
+                        app.queue_missing_link_previews(cx);
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     fn ranked_indices(&self) -> Vec<usize> {
@@ -728,6 +787,13 @@ impl StashApp {
             }
             return;
         };
+
+        if entry.link_preview.is_none()
+            && crate::link_preview::is_previewable_url(&entry.content, &entry.detected_types)
+        {
+            self.start_link_preview_fetch(entry.id.clone(), entry.content.trim().to_string(), cx);
+        }
+
         if self.preview_entry_id.as_deref() == Some(entry.id.as_str()) {
             return;
         }
@@ -754,63 +820,102 @@ impl StashApp {
     }
 
     fn render_preview_body(&self, entry: &ClipboardEntry) -> impl IntoElement {
-        if let Some(image) = &entry.image {
-            div()
-                .id("preview-image")
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h(px(180.))
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(BORDER))
-                .bg(rgb(SURFACE))
-                .overflow_hidden()
-                .child(
-                    div()
-                        .flex_1()
-                        .w_full()
-                        .min_h(px(140.))
-                        .bg(rgb(image.accent))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            img(image.path.clone())
-                                .object_fit(ObjectFit::Contain)
-                                .w_full()
-                                .h(px(200.)),
-                        ),
-                )
-                .child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .border_t_1()
-                        .border_color(rgb(BORDER))
-                        .text_size(px(11.))
-                        .text_color(rgb(MUTED))
-                        .child(format!(
-                            "{} · {}×{}",
-                            image.label, image.width, image.height
-                        )),
-                )
+        let link_thumb = entry.link_preview.clone();
+        let clipboard_image = if entry.is_image() {
+            entry.image.clone()
         } else {
-            div()
-                .id("preview-text")
-                .flex_1()
-                .min_h(px(180.))
-                .w_full()
-                .p_3()
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(BORDER))
-                .bg(rgb(SURFACE))
-                .overflow_y_scroll()
-                .text_size(px(12.))
-                .text_color(rgb(TEXT))
-                .child(self.preview.clone())
-        }
+            None
+        };
+        let show_text = clipboard_image.is_none();
+        let text_min_h = if link_thumb.is_some() {
+            px(72.)
+        } else {
+            px(180.)
+        };
+
+        div()
+            .id("preview-body")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(180.))
+            .gap_2()
+            .when_some(clipboard_image, |this, image| {
+                this.child(self.render_image_preview(&image, false))
+            })
+            .when_some(link_thumb, |this, image| {
+                this.child(self.render_image_preview(&image, true))
+            })
+            .when(show_text, |this| {
+                this.child(
+                    div()
+                        .id("preview-text")
+                        .flex_1()
+                        .min_h(text_min_h)
+                        .w_full()
+                        .p_3()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .bg(rgb(SURFACE))
+                        .overflow_y_scroll()
+                        .text_size(px(12.))
+                        .text_color(rgb(TEXT))
+                        .child(self.preview.clone()),
+                )
+            })
+    }
+
+    fn render_image_preview(
+        &self,
+        image: &crate::model::ImageMeta,
+        link_style: bool,
+    ) -> impl IntoElement {
+        let height = if link_style { px(168.) } else { px(200.) };
+        div()
+            .id(if link_style {
+                "preview-link-image"
+            } else {
+                "preview-image"
+            })
+            .flex()
+            .flex_col()
+            .when(!link_style, |this| this.flex_1().min_h(px(180.)))
+            .when(link_style, |this| this.flex_none().h(px(196.)))
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(BORDER))
+            .bg(rgb(SURFACE))
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .min_h(if link_style { px(140.) } else { px(140.) })
+                    .bg(rgb(image.accent))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        img(image.path.clone())
+                            .object_fit(ObjectFit::Contain)
+                            .w_full()
+                            .h(height),
+                    ),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .border_t_1()
+                    .border_color(rgb(BORDER))
+                    .text_size(px(11.))
+                    .text_color(rgb(MUTED))
+                    .child(format!(
+                        "{} · {}×{}",
+                        image.label, image.width, image.height
+                    )),
+            )
     }
 
     fn render_metadata(
@@ -830,6 +935,12 @@ impl StashApp {
         }
         if let Some(image) = &entry.image {
             meta_rows.push(("Dimensions", format!("{}×{}", image.width, image.height)));
+        }
+        if let Some(preview) = &entry.link_preview {
+            meta_rows.push((
+                "Site preview",
+                format!("{} · {}×{}", preview.label, preview.width, preview.height),
+            ));
         }
         if let Some(repo) = &entry.source.git_repo {
             let branch = entry.source.git_branch.as_deref().unwrap_or("-");
@@ -1234,7 +1345,11 @@ pub fn run() {
 }
 
 fn push_entry_to_system_clipboard(entry: &ClipboardEntry) -> Result<ClipboardItem, String> {
-    if let Some(image) = &entry.image {
+    if entry.is_image() {
+        let image = entry
+            .image
+            .as_ref()
+            .ok_or_else(|| "image entry missing blob".to_string())?;
         let bytes = std::fs::read(&image.path)
             .map_err(|e| format!("read image {}: {e}", image.path.display()))?;
         if bytes.is_empty() {

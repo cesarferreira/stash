@@ -220,6 +220,72 @@ impl Store {
         Ok(())
     }
 
+    /// Attach a website preview thumbnail to a URL entry (reuses image blob columns).
+    pub fn attach_link_preview(
+        &mut self,
+        id: &str,
+        preview: &crate::link_preview::LinkPreviewImage,
+    ) -> Result<(), String> {
+        let path = self.write_blob(&preview.content_hash, &preview.png)?;
+        let label = format!("preview · {}", preview.label);
+        self.conn
+            .execute(
+                "UPDATE entries
+                 SET blob_path = ?1,
+                     image_width = ?2,
+                     image_height = ?3,
+                     image_label = ?4,
+                     image_accent = ?5
+                 WHERE id = ?6",
+                params![
+                    path.to_string_lossy(),
+                    preview.width as i64,
+                    preview.height as i64,
+                    label,
+                    preview.accent as i64,
+                    id,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// URL entries that still need a website preview fetched.
+    pub fn urls_missing_preview(&self) -> Result<Vec<(String, String)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, text_content, detected_types, blob_path
+                 FROM entries
+                 WHERE text_content IS NOT NULL
+                 ORDER BY last_copied_at DESC
+                 LIMIT 40",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let text: String = row.get(1)?;
+                let types: String = row.get(2)?;
+                let blob: Option<String> = row.get(3)?;
+                Ok((id, text, types, blob))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        Ok(rows
+            .into_iter()
+            .filter(|(_, text, types, blob)| {
+                blob.is_none() && {
+                    let types = types_from_json(types);
+                    crate::link_preview::is_previewable_url(text, &types)
+                }
+            })
+            .map(|(id, text, _, _)| (id, text.trim().to_string()))
+            .collect())
+    }
+
     fn latest_id_for_hash(&self, hash: &str) -> Result<Option<String>, String> {
         self.conn
             .query_row(
@@ -290,7 +356,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
     let pinned: i64 = row.get(15)?;
     let tags_raw: String = row.get(16).unwrap_or_else(|_| "[]".into());
 
-    let image = match (blob_path, image_width, image_height) {
+    let image_fields = match (blob_path, image_width, image_height) {
         (Some(path), Some(w), Some(h)) => Some(ImageMeta {
             width: w as u32,
             height: h as u32,
@@ -302,6 +368,17 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
     };
 
     let detected_types = types_from_json(&detected_types);
+    let is_url = detected_types.contains(&ContentType::Url)
+        || detected_types.contains(&ContentType::GitHubUrl);
+    let is_image = detected_types.contains(&ContentType::Image);
+    let (image, link_preview) = if is_image {
+        (image_fields, None)
+    } else if is_url {
+        (None, image_fields)
+    } else {
+        (None, None)
+    };
+
     let pinned = pinned != 0;
     let mut tags = tags_from_json(&tags_raw);
     if tags.is_empty() {
@@ -325,6 +402,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
         copy_count: copy_count.max(1) as u32,
         pinned,
         image,
+        link_preview,
         tags,
     })
 }
