@@ -970,6 +970,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "copy-pasta"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "base64",
+ "chrono",
+ "core-graphics 0.25.0",
+ "directories",
+ "fuzzy-matcher",
+ "global-hotkey",
+ "gpui",
+ "gpui_platform",
+ "hex",
+ "image",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 0.8.23",
+ "unicode-segmentation",
+ "ureq",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4991,35 +5020,6 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
-
-[[package]]
-name = "stash"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "base64",
- "chrono",
- "core-graphics 0.25.0",
- "directories",
- "fuzzy-matcher",
- "global-hotkey",
- "gpui",
- "gpui_platform",
- "hex",
- "image",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "toml 0.8.23",
- "unicode-segmentation",
- "ureq",
- "url",
- "uuid",
-]
 
 [[package]]
 name = "static_assertions"

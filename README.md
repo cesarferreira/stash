@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>stash</h1>
+  <h1>copy-pasta</h1>
 
   <p><strong>Atuin for your clipboard — instant, searchable, context-aware paste history.</strong></p>
 
@@ -18,7 +18,7 @@
   </p>
 
   <p>
-    <img src="docs/screenshot.jpg" alt="stash clipboard history popup" width="900">
+    <img src="docs/screenshot.jpg" alt="copy-pasta clipboard history popup" width="900">
   </p>
 </div>
 
@@ -32,8 +32,8 @@ Keyboard-first clipboard history for macOS. Runs in the background, captures tex
 Requires [Rust](https://rustup.rs) **1.85+** and `~/.cargo/bin` on your `PATH`.
 
 ```bash
-git clone https://github.com/cesarferreira/stash.git
-cd stash
+git clone https://github.com/cesarferreira/copy-pasta.git
+cd copy-pasta
 make install-release
 ```
 
@@ -48,17 +48,17 @@ Run without installing:
 ```bash
 make run
 # or
-make build-release && ./target/release/stash
+make build-release && ./target/release/copy-pasta
 ```
 
 <a id="quickstart"></a>
 ## Quickstart
 
 ```bash
-stash
+copy-pasta
 ```
 
-stash runs as a **background agent** (no Dock icon). After `make install` / `make install-release`, the first launch installs a LaunchAgent so it starts again at login.
+copy-pasta runs as a **background agent** (no Dock icon). After `make install` / `make install-release`, the first launch installs a LaunchAgent so it starts again at login.
 
 | Action | How |
 |--------|-----|
@@ -70,12 +70,12 @@ In the popup: ↑↓ to move, `enter` to paste into the previous app, `tab` for 
 
 Search with `#tags` (AND): `#img`, `#txt`, `#json`, `#shell`, `#pin`, … — combine with text, e.g. `#json token`.
 
-Paste-back needs **Accessibility** permission for stash (System Settings → Privacy & Security → Accessibility) so it can send ⌘V.
+Paste-back needs **Accessibility** permission for copy-pasta (System Settings → Privacy & Security → Accessibility) so it can send ⌘V.
 
 <a id="config"></a>
 ## Config
 
-On first launch, stash writes `~/.config/stash/stash.toml`:
+On first launch, copy-pasta writes `~/.config/copy-pasta/copy-pasta.toml`:
 
 ```toml
 [hotkey]
@@ -89,7 +89,7 @@ Change `toggle` to a lowercase chord (`cmd+shift+v`, `ctrl+alt+s`, …), then re
 
 History lives at:
 
-`~/Library/Application Support/dev.stash.stash/clipboard.sqlite`
+`~/Library/Application Support/dev.copy-pasta.copy-pasta/clipboard.sqlite`
 
 ## License
 

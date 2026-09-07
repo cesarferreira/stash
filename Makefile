@@ -49,9 +49,9 @@ run:
 
 # Quick smoke install
 demo: install
-	@echo "=== stash ==="
-	@echo "Launch with: stash"
-	@echo "Toggle popup: hotkey from ~/.config/stash/stash.toml (default cmd+shift+v)"
+	@echo "=== copy-pasta ==="
+	@echo "Launch with: copy-pasta"
+	@echo "Toggle popup: hotkey from ~/.config/copy-pasta/copy-pasta.toml (default cmd+shift+v)"
 	@echo "Quit: cmd+q"
 
 # Bump version, regenerate CHANGELOG.md, tag, and push (requires cargo-release + git-cliff)

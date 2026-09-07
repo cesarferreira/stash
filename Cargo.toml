@@ -1,16 +1,16 @@
 [package]
-name = "stash"
+name = "copy-pasta"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Atuin for your clipboard — instant, searchable, context-aware paste history"
 license = "MIT"
 authors = ["Cesar Ferreira"]
-repository = "https://github.com/cesarferreira/stash"
+repository = "https://github.com/cesarferreira/copy-pasta"
 publish = false
 
 [[bin]]
-name = "stash"
+name = "copy-pasta"
 path = "src/main.rs"
 
 [dependencies]

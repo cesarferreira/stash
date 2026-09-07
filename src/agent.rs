@@ -7,7 +7,7 @@ use std::process::Command;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
-pub const LAUNCH_AGENT_LABEL: &str = "dev.stash.agent";
+pub const LAUNCH_AGENT_LABEL: &str = "dev.copy-pasta.agent";
 
 /// Hide from Dock / Cmd-Tab as a menu-bar-style accessory process.
 pub fn become_accessory() {
@@ -111,7 +111,7 @@ fn launchctl_bootstrap(plist: &PathBuf) -> Result<(), String> {
     }
 }
 
-/// Install or remove `~/Library/LaunchAgents/dev.stash.agent.plist` so stash
+/// Install or remove `~/Library/LaunchAgents/dev.copy-pasta.agent.plist` so copy-pasta
 /// starts at login and keeps capturing after reboot.
 pub fn sync_launch_agent(enabled: bool) -> Result<(), String> {
     let plist = plist_path();
@@ -148,7 +148,7 @@ pub fn sync_launch_agent(enabled: bool) -> Result<(), String> {
     fs::write(&plist, &body).map_err(|e| format!("write {}: {e}", plist.display()))?;
     launchctl_bootstrap(&plist)?;
     eprintln!(
-        "stash: LaunchAgent installed ({}) — starts at login",
+        "copy-pasta: LaunchAgent installed ({}) — starts at login",
         plist.display()
     );
     Ok(())

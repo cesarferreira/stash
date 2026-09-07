@@ -1,6 +1,6 @@
 Product Requirements Document
 
-Working Title "stash"
+Working Title "copy-pasta"
 
 One-line description:
 

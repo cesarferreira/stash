@@ -1,4 +1,4 @@
-//! User config: `~/.config/stash/stash.toml`
+//! User config: `~/.config/copy-pasta/copy-pasta.toml`
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 const DEFAULT_TOGGLE: &str = "cmd+shift+v";
 
-const DEFAULT_TOML: &str = r#"# stash configuration
+const DEFAULT_TOML: &str = r#"# copy-pasta configuration
 #
 # Hotkeys are lowercase chords: modifiers + key, joined by +.
 # Examples: cmd+shift+v, ctrl+alt+s, cmd+shift+space
@@ -18,7 +18,7 @@ const DEFAULT_TOML: &str = r#"# stash configuration
 toggle = "cmd+shift+v"
 
 [agent]
-# Install a LaunchAgent so stash starts at login (no Dock icon)
+# Install a LaunchAgent so copy-pasta starts at login (no Dock icon)
 launch_at_login = true
 "#;
 
@@ -39,7 +39,7 @@ pub struct HotkeyConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// Install `~/Library/LaunchAgents/dev.stash.agent.plist` on start.
+    /// Install `~/Library/LaunchAgents/dev.copy-pasta.agent.plist` on start.
     #[serde(default = "default_launch_at_login")]
     pub launch_at_login: bool,
 }
@@ -102,11 +102,11 @@ pub fn normalize_hotkey(raw: &str) -> String {
 }
 
 pub fn config_dir() -> PathBuf {
-    dirs_fallback().join(".config/stash")
+    dirs_fallback().join(".config/copy-pasta")
 }
 
 pub fn config_path() -> PathBuf {
-    config_dir().join("stash.toml")
+    config_dir().join("copy-pasta.toml")
 }
 
 fn dirs_fallback() -> PathBuf {
@@ -115,13 +115,13 @@ fn dirs_fallback() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Load config, creating a default `stash.toml` if missing.
+/// Load config, creating a default `copy-pasta.toml` if missing.
 pub fn load_or_create() -> Result<Config, String> {
     let path = config_path();
     if !path.exists() {
         fs::create_dir_all(config_dir()).map_err(|e| e.to_string())?;
         fs::write(&path, DEFAULT_TOML).map_err(|e| e.to_string())?;
-        eprintln!("stash: wrote default config to {}", path.display());
+        eprintln!("copy-pasta: wrote default config to {}", path.display());
         return Ok(Config::default());
     }
 

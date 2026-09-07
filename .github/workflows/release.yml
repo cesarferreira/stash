@@ -45,14 +45,14 @@ jobs:
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../stash-${{ matrix.target }}.tar.gz stash
+          tar czf ../../../copy-pasta-${{ matrix.target }}.tar.gz copy-pasta
           cd ../../..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: stash-${{ matrix.target }}
-          path: stash-${{ matrix.target }}.*
+          name: copy-pasta-${{ matrix.target }}
+          path: copy-pasta-${{ matrix.target }}.*
 
   release:
     name: Release

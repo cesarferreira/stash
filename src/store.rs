@@ -422,7 +422,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("stash-test-{nanos}"));
+        let dir = std::env::temp_dir().join(format!("copy-pasta-test-{nanos}"));
         fs::create_dir_all(&dir).unwrap();
         Store::open_at(&dir.join("clipboard.sqlite")).unwrap()
     }

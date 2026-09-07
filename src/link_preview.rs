@@ -5,7 +5,7 @@ use std::io::Read;
 use std::time::Duration;
 use url::Url;
 
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) stash/0.1";
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) copy-pasta/0.1";
 const HTML_LIMIT: u64 = 512 * 1024;
 const IMAGE_LIMIT: u64 = 5 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(8);

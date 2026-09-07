@@ -1,4 +1,4 @@
-//! Restore previous app focus and synthesize ⌘V after a stash selection.
+//! Restore previous app focus and synthesize ⌘V after a copy-pasta selection.
 
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, KeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 static PREVIOUS_PID: Mutex<Option<i32>> = Mutex::new(None);
 
-/// Remember the frontmost app if it isn't stash itself (call before activating the popup).
+/// Remember the frontmost app if it isn't copy-pasta itself (call before activating the popup).
 pub fn remember_frontmost_excluding_self() {
     let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
         return;
@@ -32,9 +32,9 @@ pub fn activate_previous_and_paste() {
     }
     // Small chance focus is still settling; callers already delay before this.
     if let Err(err) = synthesize_command_v() {
-        eprintln!("stash: paste keystroke failed: {err}");
+        eprintln!("copy-pasta: paste keystroke failed: {err}");
         eprintln!(
-            "stash: grant Accessibility to stash in System Settings → Privacy & Security → Accessibility"
+            "copy-pasta: grant Accessibility to copy-pasta in System Settings → Privacy & Security → Accessibility"
         );
     }
 }

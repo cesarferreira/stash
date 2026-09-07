@@ -1,12 +1,12 @@
-//! Local data paths for stash. History lives on disk so it survives reboots.
+//! Local data paths for copy-pasta. History lives on disk so it survives reboots.
 
 use std::fs;
 use std::path::PathBuf;
 
 pub fn data_dir() -> PathBuf {
-    directories::ProjectDirs::from("dev", "stash", "stash")
+    directories::ProjectDirs::from("dev", "copy-pasta", "copy-pasta")
         .map(|dirs| dirs.data_dir().to_path_buf())
-        .unwrap_or_else(|| dirs_fallback().join("Library/Application Support/stash"))
+        .unwrap_or_else(|| dirs_fallback().join("Library/Application Support/copy-pasta"))
 }
 
 fn dirs_fallback() -> PathBuf {

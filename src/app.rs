@@ -25,7 +25,7 @@ fn toggle_label() -> &'static str {
 }
 
 actions!(
-    stash,
+    copy_pasta,
     [
         MoveUp,
         MoveDown,
@@ -64,7 +64,7 @@ const CYAN: u32 = 0x7dcfff;
 const GREEN: u32 = 0x9ece6a;
 const SELECT: u32 = 0x2a2035;
 
-pub struct StashApp {
+pub struct CopyPastaApp {
     store: Store,
     entries: Vec<ClipboardEntry>,
     query: String,
@@ -83,16 +83,16 @@ pub struct StashApp {
     _watch_task: gpui::Task<()>,
 }
 
-impl StashApp {
+impl CopyPastaApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let preview = cx.new(SelectablePreview::new);
         let store = match Store::open() {
             Ok(store) => store,
             Err(err) => {
-                eprintln!("stash: failed to open history db: {err}");
+                eprintln!("copy-pasta: failed to open history db: {err}");
                 // Fall through with an empty in-memory store by retrying once via panic-less path —
                 // open always creates dirs; if it fails, keep a throwaway temp db.
-                let fallback = std::env::temp_dir().join("stash-fallback.sqlite");
+                let fallback = std::env::temp_dir().join("copy-pasta-fallback.sqlite");
                 let _ = std::fs::remove_file(&fallback);
                 Store::open_at(&fallback).expect("fallback sqlite")
             }
@@ -211,7 +211,7 @@ impl StashApp {
                 match fetched {
                     Ok(preview) => {
                         if let Err(err) = app.store.attach_link_preview(&id, &preview) {
-                            eprintln!("stash: save link preview: {err}");
+                            eprintln!("copy-pasta: save link preview: {err}");
                             app.link_preview_failed.insert(id);
                         } else {
                             app.reload_entries();
@@ -223,7 +223,7 @@ impl StashApp {
                         }
                     }
                     Err(err) => {
-                        eprintln!("stash: link preview for {id}: {err}");
+                        eprintln!("copy-pasta: link preview for {id}: {err}");
                         app.link_preview_failed.insert(id);
                         app.queue_missing_link_previews(cx);
                     }
@@ -612,7 +612,7 @@ impl StashApp {
                         div()
                             .text_size(px(13.))
                             .text_color(rgb(PINK))
-                            .child("stash 0.1.0"),
+                            .child("copy-pasta 0.1.0"),
                     )
                     .child(div().text_size(px(12.)).text_color(rgb(TEXT)).child(tab))
                     .child(
@@ -1127,13 +1127,13 @@ impl StashApp {
     }
 }
 
-impl Focusable for StashApp {
+impl Focusable for CopyPastaApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for StashApp {
+impl Render for CopyPastaApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.clamp_selection();
         self.sync_preview(cx);
@@ -1142,7 +1142,7 @@ impl Render for StashApp {
         let selected = self.selected;
 
         div()
-            .key_context("StashApp")
+            .key_context("CopyPastaApp")
             .track_focus(&self.focus_handle(cx))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_action(cx.listener(Self::move_up))
@@ -1233,46 +1233,46 @@ pub fn run() {
         let config = match crate::config::load_or_create() {
             Ok(cfg) => cfg,
             Err(err) => {
-                eprintln!("stash: config error ({err}) — using defaults");
+                eprintln!("copy-pasta: config error ({err}) — using defaults");
                 crate::config::Config::default()
             }
         };
         let _ = TOGGLE_LABEL.set(config.hotkey.toggle.clone());
 
         if let Err(err) = crate::agent::sync_launch_agent(config.agent.launch_at_login) {
-            eprintln!("stash: LaunchAgent sync failed: {err}");
+            eprintln!("copy-pasta: LaunchAgent sync failed: {err}");
         }
 
         let agent_mode = crate::agent::is_agent_launch();
         if agent_mode {
-            eprintln!("stash: agent mode (background capture; hotkey shows popup)");
+            eprintln!("copy-pasta: agent mode (background capture; hotkey shows popup)");
         }
 
         fonts::load(cx);
         crate::selectable_preview::bind_keys(cx);
         cx.bind_keys([
-            KeyBinding::new("up", MoveUp, Some("StashApp")),
-            KeyBinding::new("ctrl-k", MoveUp, Some("StashApp")),
-            KeyBinding::new("down", MoveDown, Some("StashApp")),
-            KeyBinding::new("ctrl-j", MoveDown, Some("StashApp")),
-            KeyBinding::new("enter", Confirm, Some("StashApp")),
-            KeyBinding::new("tab", OpenActions, Some("StashApp")),
-            KeyBinding::new("escape", Close, Some("StashApp")),
-            KeyBinding::new("cmd-e", EditBeforePaste, Some("StashApp")),
-            KeyBinding::new("cmd-p", TogglePin, Some("StashApp")),
-            KeyBinding::new("cmd-d", DeleteEntry, Some("StashApp")),
-            KeyBinding::new("cmd-c", CopySelected, Some("StashApp")),
-            KeyBinding::new("backspace", BackspaceChar, Some("StashApp")),
-            KeyBinding::new("ctrl-u", ClearQuery, Some("StashApp")),
-            KeyBinding::new("cmd-1", PasteIndex1, Some("StashApp")),
-            KeyBinding::new("cmd-2", PasteIndex2, Some("StashApp")),
-            KeyBinding::new("cmd-3", PasteIndex3, Some("StashApp")),
-            KeyBinding::new("cmd-4", PasteIndex4, Some("StashApp")),
-            KeyBinding::new("cmd-5", PasteIndex5, Some("StashApp")),
-            KeyBinding::new("cmd-6", PasteIndex6, Some("StashApp")),
-            KeyBinding::new("cmd-7", PasteIndex7, Some("StashApp")),
-            KeyBinding::new("cmd-8", PasteIndex8, Some("StashApp")),
-            KeyBinding::new("cmd-9", PasteIndex9, Some("StashApp")),
+            KeyBinding::new("up", MoveUp, Some("CopyPastaApp")),
+            KeyBinding::new("ctrl-k", MoveUp, Some("CopyPastaApp")),
+            KeyBinding::new("down", MoveDown, Some("CopyPastaApp")),
+            KeyBinding::new("ctrl-j", MoveDown, Some("CopyPastaApp")),
+            KeyBinding::new("enter", Confirm, Some("CopyPastaApp")),
+            KeyBinding::new("tab", OpenActions, Some("CopyPastaApp")),
+            KeyBinding::new("escape", Close, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-e", EditBeforePaste, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-p", TogglePin, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-d", DeleteEntry, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-c", CopySelected, Some("CopyPastaApp")),
+            KeyBinding::new("backspace", BackspaceChar, Some("CopyPastaApp")),
+            KeyBinding::new("ctrl-u", ClearQuery, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-1", PasteIndex1, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-2", PasteIndex2, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-3", PasteIndex3, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-4", PasteIndex4, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-5", PasteIndex5, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-6", PasteIndex6, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-7", PasteIndex7, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-8", PasteIndex8, Some("CopyPastaApp")),
+            KeyBinding::new("cmd-9", PasteIndex9, Some("CopyPastaApp")),
             KeyBinding::new("cmd-q", Quit, None),
         ]);
 
@@ -1283,7 +1283,7 @@ pub fn run() {
         let hotkeys = match crate::hotkey::HotkeyService::start(&config.hotkey.toggle) {
             Ok(service) => {
                 eprintln!(
-                    "stash: global hotkey `{}` registered (config: {})",
+                    "copy-pasta: global hotkey `{}` registered (config: {})",
                     service.label,
                     crate::config::config_path().display()
                 );
@@ -1291,7 +1291,7 @@ pub fn run() {
             }
             Err(err) => {
                 eprintln!(
-                    "stash: {err} — use the configured hotkey to reopen, or fix ~/.config/stash/stash.toml"
+                    "copy-pasta: {err} — use the configured hotkey to reopen, or fix ~/.config/copy-pasta/copy-pasta.toml"
                 );
                 None
             }
@@ -1311,7 +1311,7 @@ pub fn run() {
                     window_background: WindowBackgroundAppearance::Opaque,
                     ..Default::default()
                 },
-                |_, cx| cx.new(StashApp::new),
+                |_, cx| cx.new(CopyPastaApp::new),
             )
             .unwrap();
 
@@ -1372,7 +1372,7 @@ fn clipboard_item_for_entry(entry: &ClipboardEntry) -> Result<ClipboardItem, Str
     push_entry_to_system_clipboard(entry)
 }
 
-fn toggle_popup(window: gpui::WindowHandle<StashApp>, cx: &mut App) {
+fn toggle_popup(window: gpui::WindowHandle<CopyPastaApp>, cx: &mut App) {
     let hidden = crate::hotkey::app_is_hidden();
     let handle: AnyWindowHandle = window.into();
     let ours_active = cx.active_window() == Some(handle);
