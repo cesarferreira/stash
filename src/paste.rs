@@ -4,6 +4,7 @@ use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, KeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 static PREVIOUS_PID: Mutex<Option<i32>> = Mutex::new(None);
 
@@ -29,8 +30,12 @@ fn previous_pid() -> Option<i32> {
 pub fn activate_previous_and_paste() {
     if let Some(pid) = previous_pid() {
         activate_pid(pid);
+        // ⌘-key equivalents are only routed to the frontmost/key app, so wait for
+        // activation to actually land before sending the keystroke — a fixed
+        // sleep here was racy and could fire before the target app regained
+        // focus, dropping the paste (or misdirecting it) intermittently.
+        wait_until_frontmost(pid, Duration::from_millis(500));
     }
-    // Small chance focus is still settling; callers already delay before this.
     if let Err(err) = synthesize_command_v() {
         eprintln!("copy-pasta: paste keystroke failed: {err}");
         eprintln!(
@@ -44,6 +49,19 @@ fn activate_pid(pid: i32) {
         return;
     };
     let _ = app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+}
+
+fn wait_until_frontmost(pid: i32, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let is_front = NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .is_some_and(|app| app.processIdentifier() == pid);
+        if is_front {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
 }
 
 fn synthesize_command_v() -> Result<(), String> {
