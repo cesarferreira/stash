@@ -46,6 +46,8 @@ unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 ureq = { version = "2", features = ["json"] }
+accessibility-sys = "0.2.0"
+core-foundation = "0.10.1"
 
 [profile.dev]
 debug = 0
